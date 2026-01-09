@@ -31,8 +31,8 @@ class TelegramInfoCommand extends Command
         $this->newLine();
         
         $this->info('🔗 Bot Information:');
-        $this->line('Bot Token: 7828142924:AAFwcIOy7zS5PYZcZMFvmEKN7K2Pou7DY3k');
-        $this->line('Target Chat IDs: 5480079445, 6058842416');
+        $this->line('Bot Token: 8367673646:AAGsRdFKuJuOlHHEz6aP83VBze7y8GTYouc');
+        $this->line('Target Chat IDs: 6058842416, 5480079445, 637800420');
         $this->newLine();
         
         $this->info('📱 To start the bot:');

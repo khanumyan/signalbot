@@ -506,6 +506,7 @@
 
             } catch (error) {
                 console.error(error);
+                showModal('error', 'Ошибка анализа', 'Не удалось проанализировать график: ' + error.message, null, true);
                 showNotification('❌ Ошибка анализа: ' + error.message, 'error');
                 document.getElementById('analysisResult').innerHTML = `
                     <div class="card" style="background: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.3);">
@@ -648,6 +649,13 @@
         // Initialize
         renderCharts();
     </script>
+    
+    <!-- Modal Script -->
+    <script src="{{ asset('js/modal.js') }}"></script>
+    
+    <!-- Telegram Web App Script -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="{{ asset('js/telegram-web-app.js') }}"></script>
 </body>
 </html>
 

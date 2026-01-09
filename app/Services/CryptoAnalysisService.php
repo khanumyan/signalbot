@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\Log;
 
 class CryptoAnalysisService
 {
-    private string $binanceApiUrl = 'https://api.binance.com/api/v3/klines';
+    private string $binanceApiUrl = 'https://fapi.binance.com/fapi/v1/klines';
 
     /**
      * Fetch klines data from Binance
@@ -252,5 +252,11 @@ class CryptoAnalysisService
         ];
     }
 }
+
+
+
+
+
+
 
 

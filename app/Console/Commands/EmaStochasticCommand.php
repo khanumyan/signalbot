@@ -217,7 +217,7 @@ class EmaStochasticCommand extends Command
 
     private function fetchKlinesData(string $symbol, string $interval, int $limit): array
     {
-        $response = Http::timeout(10)->get('https://api.binance.com/api/v3/klines', [
+        $response = Http::timeout(10)->get('https://fapi.binance.com/fapi/v1/klines', [
             'symbol' => $symbol . 'USDT',
             'interval' => $interval,
             'limit' => $limit

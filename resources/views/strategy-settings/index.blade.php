@@ -956,6 +956,7 @@
                 })
                 .catch(error => {
                     console.error('Error loading strategy params:', error);
+                    showModal('error', 'Ошибка', 'Не удалось загрузить параметры стратегии.', null, true);
                 });
         });
 
@@ -1163,10 +1164,18 @@
                     });
                 } else {
                     console.error('TradingView script not loaded');
+                    showModal('warning', 'Предупреждение', 'Не удалось загрузить график TradingView. Попробуйте обновить страницу.', null, true);
                 }
             }, 100);
         }
     </script>
+    
+    <!-- Modal Script (if not already included) -->
+    <script src="{{ asset('js/modal.js') }}"></script>
+    
+    <!-- Telegram Web App Script -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="{{ asset('js/telegram-web-app.js') }}"></script>
 </body>
 </html>
 

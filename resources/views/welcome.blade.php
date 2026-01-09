@@ -29,6 +29,34 @@
         .header {
             text-align: center;
             padding: 40px 16px 30px 16px;
+            position: relative;
+        }
+
+        .logout-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(239, 68, 68, 0.2);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 8px;
+            padding: 8px 16px;
+            color: #fca5a5;
+            text-decoration: none;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+
+        .logout-btn:hover {
+            background: rgba(239, 68, 68, 0.3);
+            border-color: rgba(239, 68, 68, 0.5);
+        }
+
+        .user-info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            font-size: 14px;
+            color: #94a3b8;
         }
 
         .header-title {
@@ -167,6 +195,122 @@
             color: #94a3b8;
         }
 
+        /* News Section */
+        .news-section {
+            margin-top: 60px;
+        }
+
+        .news-section-title {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            font-size: 20px;
+            font-weight: bold;
+            color: #a855f7;
+        }
+
+        .news-section-link {
+            font-size: 14px;
+            color: #c4b5fd;
+            text-decoration: none;
+            transition: all 0.3s ease;
+        }
+
+        .news-section-link:hover {
+            color: #a855f7;
+        }
+
+        .news-grid-home {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 16px;
+        }
+
+        .news-card-home {
+            background: rgba(30, 41, 59, 0.6);
+            border: 1px solid rgba(168, 85, 247, 0.3);
+            border-radius: 12px;
+            overflow: hidden;
+            text-decoration: none;
+            color: inherit;
+            display: block;
+            transition: all 0.3s ease;
+        }
+
+        .news-card-home:hover {
+            background: rgba(30, 41, 59, 0.8);
+            border-color: rgba(168, 85, 247, 0.5);
+            transform: translateY(-2px);
+        }
+
+        .news-image {
+            width: 100%;
+            height: 180px;
+            object-fit: cover;
+            background: rgba(15, 23, 42, 0.6);
+        }
+
+        .news-card-content {
+            padding: 16px;
+        }
+
+        .news-card-title {
+            font-size: 14px;
+            font-weight: bold;
+            margin-bottom: 8px;
+            color: #ffffff;
+            line-height: 1.4;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .news-card-meta {
+            font-size: 12px;
+            color: #64748b;
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .telegram-banner {
+            margin-top: 30px;
+            padding: 20px;
+            background: linear-gradient(135deg, rgba(168, 85, 247, 0.2) 0%, rgba(236, 72, 153, 0.2) 100%);
+            border: 1px solid rgba(168, 85, 247, 0.4);
+            border-radius: 16px;
+            text-align: center;
+        }
+
+        .telegram-banner-text {
+            font-size: 14px;
+            color: #cbd5e1;
+            margin-bottom: 12px;
+            line-height: 1.6;
+        }
+
+        .telegram-banner-link {
+            display: inline-block;
+            background: rgba(168, 85, 247, 0.3);
+            border: 1px solid rgba(168, 85, 247, 0.5);
+            border-radius: 10px;
+            padding: 12px 24px;
+            color: #c4b5fd;
+            text-decoration: none;
+            font-size: 15px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+
+        .telegram-banner-link:hover {
+            background: rgba(168, 85, 247, 0.4);
+            border-color: rgba(168, 85, 247, 0.7);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(168, 85, 247, 0.3);
+        }
+
         /* Footer */
         .footer {
             text-align: center;
@@ -179,6 +323,15 @@
 <body>
     <!-- Header -->
     <div class="header">
+        <div class="user-info">
+            👤 {{ Auth::user()->name }}
+        </div>
+        <form method="POST" action="{{ route('logout') }}" id="logoutForm" style="position: absolute; top: 20px; right: 20px;">
+            @csrf
+            <button type="button" class="logout-btn" onclick="handleLogout()">
+                Выйти
+            </button>
+        </form>
         <div class="logo-container">
             <img src="{{ asset('images/erasebg-transformed (1).png') }}" alt="Trading Helper Bot Logo" class="logo-image" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
             <div style="display: none; align-items: center; justify-content: center; gap: 12px;">
@@ -228,6 +381,18 @@
                     Перейти <span>→</span>
                 </div>
             </a>
+
+            <!-- Crypto News -->
+            <a href="{{ route('crypto-news.index') }}" class="menu-card">
+                <div class="menu-card-icon">📰</div>
+                <div class="menu-card-title">Крипто Новости</div>
+                <div class="menu-card-description">
+                    Последние новости из мира криптовалют. Актуальная информация о рынке, событиях и трендах.
+                </div>
+                <div class="menu-card-arrow">
+                    Перейти <span>→</span>
+                </div>
+            </a>
         </div>
 
         <!-- Stats Section -->
@@ -248,6 +413,47 @@
                 </div>
             </div>
         </div>
+
+        <!-- News Section -->
+        @if(isset($latestNews) && $latestNews->count() > 0)
+        <div class="news-section">
+            <div class="news-section-title">
+                <span>📰 Последние новости</span>
+                <a href="{{ route('crypto-news.index') }}" class="news-section-link">
+                    Все новости →
+                </a>
+            </div>
+            <div class="news-grid-home">
+                @foreach($latestNews as $item)
+                    <a href="{{ route('crypto-news.show', $item->id) }}" class="news-card-home">
+                        @if($item->image_url)
+                            <img src="{{ $item->image_url }}" alt="{{ $item->title }}" class="news-image" onerror="this.style.display='none';">
+                        @endif
+                        <div class="news-card-content">
+                            <div class="news-card-title">{{ str_replace('ДОСТУПНО ТОЛЬКО В ПЛАТНЫХ ПЛАНАХ', '', $item->title) }}</div>
+                            <div class="news-card-meta">
+                                @if($item->pub_date)
+                                    <span style="color: #a855f7; font-weight: bold;">📅 {{ $item->pub_date->format('d.m.Y H:i') }}</span>
+                                @endif
+                                @if($item->source_name)
+                                    <span>📡 {{ Str::limit($item->source_name, 20) }}</span>
+                                @endif
+                            </div>
+                        </div>
+                    </a>
+                @endforeach
+            </div>
+            <div class="telegram-banner" style="margin-top: 30px;">
+                <div class="telegram-banner-text">
+                    💡 Хотите первыми узнавать новости?<br>
+                    Подпишитесь на наш Telegram канал!
+                </div>
+                <a href="https://t.me/traidinghelpernews" target="_blank" class="telegram-banner-link">
+                    📢 Подписаться на канал
+                </a>
+            </div>
+        </div>
+        @endif
     </div>
 
     <!-- Footer -->
@@ -256,6 +462,9 @@
         <div style="margin-top: 8px; font-size: 12px;">Автоматизированная система торговых сигналов</div>
     </div>
 
+    <!-- Modal Script (must load first) -->
+    <script src="{{ asset('js/modal.js') }}"></script>
+    
     <script>
         // Load stats
         async function loadStats() {
@@ -272,11 +481,24 @@
                 }
             } catch (error) {
                 console.error('Error loading stats:', error);
+                showModal('error', 'Ошибка', 'Не удалось загрузить статистику. Попробуйте обновить страницу.', null, true);
             }
         }
 
         // Load stats on page load
         loadStats();
+
+        // Handle logout with modal
+        async function handleLogout() {
+            const confirmed = await confirm('Вы уверены, что хотите выйти?');
+            if (confirmed) {
+                document.getElementById('logoutForm').submit();
+            }
+        }
     </script>
+    
+    <!-- Telegram Web App Script -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="{{ asset('js/telegram-web-app.js') }}"></script>
     </body>
 </html>

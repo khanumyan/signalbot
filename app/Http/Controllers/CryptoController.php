@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Log;
 class CryptoController extends Controller
 {
     private $cryptoSymbols;
-    private $binanceApiUrl = 'https://api.binance.com/api/v3/klines';
+    private $binanceApiUrl = 'https://fapi.binance.com/fapi/v1/klines';
 
     public function __construct()
     {

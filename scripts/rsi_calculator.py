@@ -12,7 +12,7 @@ from typing import List, Dict, Optional
 
 class RSICalculator:
     def __init__(self):
-        self.base_url = "https://api.binance.com/api/v3/klines"
+        self.base_url = "https://fapi.binance.com/fapi/v1/klines"
         self.symbols = [
             '0G', '1000CAT', '1000CHEEMS', '1000SATS', '1INCH', '1INCHDOWN', '1INCHUP',
             '1MBABYDOGE', 'A', 'A2Z', 'AAVE', 'AAVEDOWN', 'AAVEUP', 'ACA', 'ACE', 'ACH',

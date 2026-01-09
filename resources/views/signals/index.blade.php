@@ -183,6 +183,34 @@
             color: #6ee7b7;
         }
 
+        .signal-status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-left: 8px;
+            text-transform: uppercase;
+        }
+
+        .status-done {
+            background: rgba(16, 185, 129, 0.3);
+            color: #6ee7b7;
+            border: 1px solid rgba(16, 185, 129, 0.5);
+        }
+
+        .status-missed {
+            background: rgba(239, 68, 68, 0.3);
+            color: #fca5a5;
+            border: 1px solid rgba(239, 68, 68, 0.5);
+        }
+
+        .status-processing {
+            background: rgba(251, 191, 36, 0.3);
+            color: #fde047;
+            border: 1px solid rgba(251, 191, 36, 0.5);
+        }
+
         /* Loading */
         .loading {
             text-align: center;
@@ -273,6 +301,14 @@
                                         <span class="signal-strength strength-{{ strtolower($signal->strength) }}">
                                             {{ $signal->strength }}
                                         </span>
+                                        @if($signal->status)
+                                            <span class="signal-status status-{{ strtolower($signal->status) }}">
+                                                @if($signal->status === 'DONE') ✅ Выполнен
+                                                @elseif($signal->status === 'MISSED') ❌ Пропущен
+                                                @elseif($signal->status === 'PROCESSING') ⏳ В обработке
+                                                @endif
+                                            </span>
+                                        @endif
                                     </div>
                                     <div class="signal-meta">
                                         <span>💰 ${{ number_format($signal->price, 2, '.', ' ') }}</span>
@@ -385,6 +421,7 @@
             })
             .catch(error => {
                 console.error('Error loading signals:', error);
+                showModal('error', 'Ошибка', 'Не удалось загрузить сигналы. Попробуйте обновить страницу.', null, true);
             })
             .finally(() => {
                 isLoading = false;
@@ -415,6 +452,20 @@
             const typeClass = `signal-${signal.type.toLowerCase()}`;
             const typeLabel = signal.type === 'BUY' ? '📈 LONG' : '📉 SHORT';
             
+            let statusHtml = '';
+            if (signal.status) {
+                let statusClass = `status-${signal.status.toLowerCase()}`;
+                let statusText = '';
+                if (signal.status === 'DONE') {
+                    statusText = '✅ Выполнен';
+                } else if (signal.status === 'MISSED') {
+                    statusText = '❌ Пропущен';
+                } else if (signal.status === 'PROCESSING') {
+                    statusText = '⏳ В обработке';
+                }
+                statusHtml = `<span class="signal-status ${statusClass}">${statusText}</span>`;
+            }
+            
             card.innerHTML = `
                 <div class="signal-item">
                     <div class="signal-info">
@@ -423,6 +474,7 @@
                             <span class="signal-strength ${strengthClass}">
                                 ${signal.strength}
                             </span>
+                            ${statusHtml}
                         </div>
                         <div class="signal-meta">
                             <span>💰 $${parseFloat(signal.price).toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
@@ -467,5 +519,12 @@
             });
         @endif
     </script>
+    
+    <!-- Modal Script -->
+    <script src="{{ asset('js/modal.js') }}"></script>
+    
+    <!-- Telegram Web App Script -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="{{ asset('js/telegram-web-app.js') }}"></script>
 </body>
 </html>

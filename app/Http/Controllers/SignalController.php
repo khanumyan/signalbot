@@ -44,6 +44,7 @@ class SignalController extends Controller
                         'price' => $signal->price,
                         'strategy' => $signal->strategy,
                         'signal_time' => $signal->signal_time->toIso8601String(),
+                        'status' => $signal->status,
                     ];
                 }),
                 'hasMore' => ($page * $perPage) < $total,

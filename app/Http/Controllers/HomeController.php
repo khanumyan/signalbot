@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\CryptoSignal;
+use App\Models\CryptoNews;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Carbon\Carbon;
@@ -14,7 +15,12 @@ class HomeController extends Controller
      */
     public function index()
     {
-        return view('welcome');
+        // Get latest 6 news
+        $latestNews = CryptoNews::orderBy('pub_date', 'desc')
+            ->limit(6)
+            ->get();
+
+        return view('welcome', compact('latestNews'));
     }
 
     /**

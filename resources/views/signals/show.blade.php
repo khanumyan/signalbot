@@ -145,6 +145,34 @@
             color: #6ee7b7;
         }
 
+        .signal-status {
+            display: inline-block;
+            padding: 6px 16px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-left: 12px;
+            text-transform: uppercase;
+        }
+
+        .status-done {
+            background: rgba(16, 185, 129, 0.3);
+            color: #6ee7b7;
+            border: 1px solid rgba(16, 185, 129, 0.5);
+        }
+
+        .status-missed {
+            background: rgba(239, 68, 68, 0.3);
+            color: #fca5a5;
+            border: 1px solid rgba(239, 68, 68, 0.5);
+        }
+
+        .status-processing {
+            background: rgba(251, 191, 36, 0.3);
+            color: #fde047;
+            border: 1px solid rgba(251, 191, 36, 0.5);
+        }
+
         /* Trade Levels */
         .trade-levels {
             margin: 16px 0;
@@ -287,6 +315,16 @@
                     <div class="signal-badge signal-{{ strtolower($signal->type) }}">
                         {{ $signal->type === 'BUY' ? '📈 LONG' : '📉 SHORT' }}
                     </div>
+                    @if($signal->status)
+                        <div style="text-align: center; margin-top: 8px;">
+                            <span class="signal-status status-{{ strtolower($signal->status) }}">
+                                @if($signal->status === 'DONE') ✅ Выполнен
+                                @elseif($signal->status === 'MISSED') ❌ Пропущен
+                                @elseif($signal->status === 'PROCESSING') ⏳ В обработке
+                                @endif
+                            </span>
+                        </div>
+                    @endif
                     <div style="text-align: center; font-size: 11px; color: #cbd5e1; margin-top: 4px;">
                         Сила: 
                         <span class="signal-strength strength-{{ strtolower($signal->strength) }}">
@@ -388,6 +426,13 @@
             ]
         });
     </script>
+    
+    <!-- Modal Script -->
+    <script src="{{ asset('js/modal.js') }}"></script>
+    
+    <!-- Telegram Web App Script -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="{{ asset('js/telegram-web-app.js') }}"></script>
 </body>
 </html>
 

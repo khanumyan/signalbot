@@ -65,3 +65,30 @@ Schedule::command('crypto:ichimoku-rsi --telegram-only --interval=1h')
     ->withoutOverlapping()
     ->runInBackground()
     ->appendOutputTo(storage_path('logs/crypto_analysis.log'));
+
+// Crypto News (Russian) - каждые 30 минут
+Schedule::command('crypto:fetch-news')
+    ->cron('*/30 * * * *')
+    ->withoutOverlapping()
+    ->runInBackground()
+    ->appendOutputTo(storage_path('logs/crypto_news.log'));
+
+// Crypto News (English) - каждые 30 минут
+Schedule::command('crypto:fetch-news-en')
+    ->cron('*/30 * * * *')
+    ->withoutOverlapping()
+    ->runInBackground()
+    ->appendOutputTo(storage_path('logs/crypto_news.log'));
+
+// Check Signal Status - каждый день в 12:00 и 00:00
+Schedule::command('signals:check-status')
+    ->dailyAt('12:00')
+    ->withoutOverlapping()
+    ->runInBackground()
+    ->appendOutputTo(storage_path('logs/signal_status.log'));
+
+Schedule::command('signals:check-status')
+    ->dailyAt('00:00')
+    ->withoutOverlapping()
+    ->runInBackground()
+    ->appendOutputTo(storage_path('logs/signal_status.log'));

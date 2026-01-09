@@ -23,7 +23,8 @@ class CryptoSignal extends Model
         'ltf_rsi',
         'reason',
         'sent_to_telegram',
-        'signal_time'
+        'signal_time',
+        'status'
     ];
 
     protected $casts = [
@@ -35,9 +36,10 @@ class CryptoSignal extends Model
         'volume_ratio' => 'decimal:4',
         'htf_rsi' => 'decimal:4',
         'ltf_rsi' => 'decimal:4',
-        'sent_to_telegram' => 'boolean',
-        'signal_time' => 'datetime'
-    ];
+            'sent_to_telegram' => 'boolean',
+            'signal_time' => 'datetime',
+            'status' => 'string'
+        ];
 
     /**
      * Проверяет, был ли сигнал для данного символа в последние минуты

@@ -5,25 +5,29 @@ namespace App\Services;
 use Telegram\Bot\Api;
 use Telegram\Bot\Exceptions\TelegramSDKException;
 use Illuminate\Support\Facades\Log;
+use Telegram\Bot\FileUpload\InputFile;
 
 class TelegramService
 {
     protected Api $telegram;
     protected Api $instantTelegram; // Дополнительный бот для мгновенных сигналов
     protected array $chatIds;
+    protected array $instantChatIds;
 
     public function __construct()
     {
-        $token = '7828142924:AAFwcIOy7zS5PYZcZMFvmEKN7K2Pou7DY3k';
+        // Основной бот для системных сообщений (сводки, уведомления, новости)
+        $token = '8397094934:AAFu68lLwMXew_kuL8puegZkz0WC_-0rlbk';
         $this->telegram = new Api($token);
 
-        // Дополнительный бот для мгновенных сигналов
-        $instantToken = '8299475505:AAEErEGhxriO9rmBlFE0MiMYAi6vKcbgN84';
+        // Отдельный бот для трейдинговых сигналов (BUY/SELL)
+        $instantToken = '8367673646:AAGsRdFKuJuOlHHEz6aP83VBze7y8GTYouc';
         $this->instantTelegram = new Api($instantToken);
 
-        $this->chatIds = [6058842416, 5480079445]; // Два пользователя
+        // Чаты для системных сообщений (старые)
+        $this->chatIds = [6058842416, 5480079445];
 
-        // Дополнительные чаты для мгновенных сигналов
+        // Чаты для трейдинговых сигналов
         $this->instantChatIds = [
             6058842416,
             5480079445,
@@ -40,6 +44,37 @@ class TelegramService
         } catch (TelegramSDKException $e) {
             Log::error('Telegram connection failed: ' . $e->getMessage());
             return false;
+        }
+    }
+
+    /**
+     * Get Telegram bot access token
+     */
+    public function getAccessToken(): string
+    {
+        return $this->telegram->getAccessToken();
+    }
+
+    /**
+     * Get Telegram bot username
+     */
+    public function getBotUsername(): string
+    {
+        // Use configured username or get from API
+        $configuredUsername = env('TELEGRAM_BOT_USERNAME', 'traidinghelperbestbot');
+
+        if (!empty($configuredUsername)) {
+            // Remove @ if present
+            return ltrim($configuredUsername, '@');
+        }
+
+        // Fallback: try to get from API
+        try {
+            $response = $this->telegram->getMe();
+            return $response->getUsername();
+        } catch (TelegramSDKException $e) {
+            Log::error("Failed to get bot username: " . $e->getMessage());
+            return 'traidinghelperbestbot'; // Default fallback
         }
     }
 
@@ -372,5 +407,306 @@ class TelegramService
 
         // Возвращаем true если хотя бы один чат получил сообщение
         return $successCount > 0;
+    }
+
+    /**
+     * Send welcome message with Web App button
+     */
+    public function sendWelcomeMessage(int $chatId): bool
+    {
+        try {
+            $webAppUrl = env('APP_URL', 'http://localhost:8000');
+
+            $message = "🤖 *Добро пожаловать в Trading Helper Bot!*\n\n";
+            $message .= "📊 *Автоматизированная система анализа криптовалютных рынков*\n\n";
+            $message .= "✨ *Возможности бота:*\n";
+            $message .= "📈 История торговых сигналов с фильтрацией\n";
+            $message .= "⚙️ Настройка параметров стратегий\n";
+            $message .= "📊 Live анализ криптовалют в реальном времени\n";
+            $message .= "🤖 AI анализ графиков\n";
+            $message .= "📱 Удобный веб-интерфейс\n\n";
+            $message .= "🚀 *Нажмите кнопку ниже, чтобы открыть приложение и начать работу!*";
+
+            $this->telegram->sendMessage([
+                'chat_id' => $chatId,
+                'text' => $message,
+                'parse_mode' => 'Markdown',
+                'reply_markup' => json_encode([
+                    'inline_keyboard' => [
+                        [
+                            [
+                                'text' => '🚀 Открыть приложение',
+                                'web_app' => ['url' => $webAppUrl]
+                            ]
+                        ]
+                    ]
+                ])
+            ]);
+
+            return true;
+        } catch (TelegramSDKException $e) {
+            Log::error("Failed to send welcome message: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Send verification code request message
+     */
+    public function sendVerificationCodeRequest(int $chatId, string $code): bool
+    {
+        try {
+            $message = "🔐 *Подтверждение номера телефона*\n\n";
+            $message .= "Пожалуйста, введите код подтверждения, который показан на странице веб-приложения.\n\n";
+            $message .= "Код состоит из 4 цифр.";
+
+            $this->telegram->sendMessage([
+                'chat_id' => $chatId,
+                'text' => $message,
+                'parse_mode' => 'Markdown'
+            ]);
+
+            return true;
+        } catch (TelegramSDKException $e) {
+            Log::error("Failed to send verification code request: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Send message to specific chat
+     */
+    public function sendMessageToChat(int $chatId, string $message, string $parseMode = 'Markdown'): bool
+    {
+        try {
+            $this->telegram->sendMessage([
+                'chat_id' => $chatId,
+                'text' => $message,
+                'parse_mode' => $parseMode
+            ]);
+            return true;
+        } catch (TelegramSDKException $e) {
+            Log::error("Failed to send message to chat {$chatId}: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Send crypto news to Telegram chat
+     */
+    public function sendCryptoNews(\App\Models\CryptoNews $news): bool
+    {
+        $chatId = -1003511743710; // News channel chat ID
+        
+        try {
+            // Use instantTelegram bot for sending news (it has access to the channel)
+            $bot = $this->instantTelegram;
+
+            // Format message
+            $message = "📰 *" . $this->escapeMarkdown($news->title) . "*\n\n";
+
+            if ($news->description) {
+                $description = mb_substr($news->description, 0, 300);
+                if (mb_strlen($news->description) > 300) {
+                    $description .= '...';
+                }
+                $message .= $this->escapeMarkdown($description) . "\n\n";
+            }
+
+            // Determine language for labels
+            $isEnglish = $news->language === 'en' || (isset($news->language) && strtolower($news->language) === 'en');
+            $coinsLabel = $isEnglish ? 'Coins' : 'Монеты';
+            $authorLabel = $isEnglish ? 'Author' : 'Автор';
+            $sourceLabel = $isEnglish ? 'Source' : 'Источник';
+            $dateLabel = $isEnglish ? 'Date' : 'Дата';
+            $readMoreLabel = $isEnglish ? 'Read more' : 'Читать далее';
+            $dateFormat = $isEnglish ? 'Y-m-d H:i' : 'd.m.Y H:i';
+
+            // Add coins if available
+            if ($news->coin && is_array($news->coin) && !empty($news->coin)) {
+                $coins = implode(', ', array_filter($news->coin)); // Убираем пустые значения
+                if (!empty($coins)) {
+                    $message .= "🪙 *{$coinsLabel}:* `{$coins}`\n";
+                }
+            }
+
+            // Add creator if available
+            if ($news->creator && is_array($news->creator) && !empty($news->creator)) {
+                $creators = array_map(function($c) {
+                    return strip_tags($c); // Remove HTML tags from creator
+                }, array_filter($news->creator)); // Убираем пустые значения
+                
+                if (!empty($creators)) {
+                    $creator = implode(', ', $creators);
+                    $creator = mb_substr($creator, 0, 100);
+                    $message .= "✍️ *{$authorLabel}:* {$creator}\n";
+                }
+            }
+
+            // Add source if available
+            if ($news->source_name) {
+                $message .= "📡 *{$sourceLabel}:* {$news->source_name}\n";
+            }
+
+            // Add date
+            if ($news->pub_date) {
+                $message .= "📅 *{$dateLabel}:* " . $news->pub_date->format($dateFormat) . "\n";
+            }
+
+            $message .= "\n🔗 [{$readMoreLabel}]({$news->link})";
+
+            // Check if image is accessible before trying to send it
+            $imageUrl = null;
+            if ($news->image_url) {
+                $imageUrl = $this->checkImageAccessibility($news->image_url);
+            }
+
+            // Try to send with photo if available and accessible
+            if ($imageUrl) {
+                try {
+                    $photo = InputFile::create($imageUrl);
+                    $bot->sendPhoto([
+                        'chat_id' => $chatId,
+                        'photo' => $photo,
+                        'caption' => $message,
+                        'parse_mode' => 'Markdown',
+                        'disable_web_page_preview' => false,
+                    ]);
+                    return true;
+                } catch (\Exception $e) {
+                    // If photo fails, fallback to text message
+                    Log::debug("Failed to send photo for news {$news->id}: " . $e->getMessage());
+                }
+            }
+
+            // Send text message (with or without photo)
+            $bot->sendMessage([
+                'chat_id' => $chatId,
+                'text' => $message,
+                'parse_mode' => 'Markdown',
+                'disable_web_page_preview' => false,
+            ]);
+
+            return true;
+
+        } catch (TelegramSDKException $e) {
+            Log::error("Failed to send crypto news to Telegram: " . $e->getMessage(), [
+                'news_id' => $news->id,
+                'article_id' => $news->article_id,
+                'chat_id' => $chatId
+            ]);
+            return false;
+        } catch (\Exception $e) {
+            Log::error("Error sending crypto news: " . $e->getMessage(), [
+                'news_id' => $news->id,
+                'article_id' => $news->article_id,
+                'chat_id' => $chatId
+            ]);
+            return false;
+        }
+    }
+
+    /**
+     * Check if image URL is accessible
+     */
+    protected function checkImageAccessibility(string $url): ?string
+    {
+        try {
+            $context = stream_context_create([
+                'http' => [
+                    'method' => 'HEAD',
+                    'timeout' => 5,
+                    'user_agent' => 'Mozilla/5.0 (compatible; TelegramBot/1.0)',
+                    'follow_location' => true,
+                    'max_redirects' => 3
+                ]
+            ]);
+
+            $headers = @get_headers($url, 1, $context);
+            
+            if ($headers === false) {
+                return null;
+            }
+
+            $statusCode = 0;
+            if (is_array($headers[0])) {
+                $statusCode = (int) substr($headers[0][0], 9, 3);
+            } else {
+                $statusCode = (int) substr($headers[0], 9, 3);
+            }
+
+            // Check if status code is 200 (OK)
+            if ($statusCode === 200) {
+                return $url;
+            }
+
+            return null;
+        } catch (\Exception $e) {
+            Log::debug("Failed to check image accessibility for {$url}: " . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Escape Markdown special characters
+     */
+    protected function escapeMarkdown(string $text): string
+    {
+        // Escape special Markdown characters: _ * [ ] ( ) ~ ` > # + - = | { } . !
+        return str_replace(
+            ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!'],
+            ['\_', '\*', '\[', '\]', '\(', '\)', '\~', '\`', '\>', '\#', '\+', '\-', '\=', '\|', '\{', '\}', '\.', '\!'],
+            $text
+        );
+    }
+
+    /**
+     * Setup bot menu with Web App buttons
+     */
+    public function setupMenu(array $menuButtons): bool
+    {
+        try {
+            // Set bot commands
+            $this->telegram->setMyCommands([
+                'commands' => [
+                    ['command' => 'start', 'description' => 'Начать работу с ботом'],
+                ]
+            ]);
+
+            // Set menu button - используем прямой HTTP запрос к Telegram API
+            $webAppUrl = env('APP_URL', 'http://localhost:8000');
+
+            // Проверка на HTTPS
+            if (!str_starts_with($webAppUrl, 'https://')) {
+                throw new \Exception("APP_URL должен использовать HTTPS! Текущий URL: {$webAppUrl}. Для локального тестирования используйте ngrok.");
+            }
+
+            $token = $this->telegram->getAccessToken();
+
+            // Используем Http facade для прямого вызова API
+            $response = \Illuminate\Support\Facades\Http::post("https://api.telegram.org/bot{$token}/setChatMenuButton", [
+                'menu_button' => [
+                    'type' => 'web_app',
+                    'text' => '📊 Открыть приложение',
+                    'web_app' => [
+                        'url' => $webAppUrl
+                    ]
+                ]
+            ]);
+
+            if ($response->successful() && $response->json('ok')) {
+                Log::info('Telegram bot menu configured successfully');
+                return true;
+            } else {
+                Log::error('Failed to setup menu: ' . $response->body());
+                return false;
+            }
+        } catch (TelegramSDKException $e) {
+            Log::error("Failed to setup menu: " . $e->getMessage());
+            return false;
+        } catch (\Exception $e) {
+            Log::error("Failed to setup menu: " . $e->getMessage());
+            return false;
+        }
     }
 }
