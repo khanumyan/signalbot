@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>{{ $signal->symbol }} - Crypto AI Trading Bot</title>
+    <title>{{ $signal->symbol }} - Traiding Helper Pro</title>
     <style>
         * {
             margin: 0;
@@ -291,7 +291,7 @@
             <div>
                 <div style="display: flex; align-items: center; gap: 12px;">
                     <a href="{{ route('signals.index') }}" class="back-button">← Назад к списку</a>
-                    <img src="{{ asset('images/erasebg-transformed (1).png') }}" alt="Logo" style="width: 40px; height: 40px; object-fit: contain;">
+                    <img src="{{ asset('images/Traiding (1).svg') }}" alt="Logo" style="width: 40px; height: 40px; object-fit: contain;">
                     <div>
                         <div class="header-title">📊 Детали сигнала</div>
                         <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">{{ $signal->symbol }} - {{ $signal->signal_time->format('d.m.Y H:i') }}</div>

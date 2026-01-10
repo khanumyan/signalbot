@@ -347,7 +347,7 @@
             <div>
                 <div style="display: flex; align-items: center; gap: 12px;">
                     <a href="/" class="back-button">← Назад</a>
-                    <img src="{{ asset('images/erasebg-transformed (1).png') }}" alt="Logo" style="width: 40px; height: 40px; object-fit: contain;">
+                    <img src="{{ asset('images/Traiding (2).svg') }}" alt="Logo" style="width: 40px; height: 40px; object-fit: contain;">
                     <div>
                         <div style="display: flex; align-items: center; gap: 8px;">
                             <span class="header-title">AI Анализ графиков</span>

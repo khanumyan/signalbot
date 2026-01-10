@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>Вход - Trading Helper Bot</title>
+    <title>Вход - Traiding Helper Pro</title>
     <style>
         * {
             margin: 0;
@@ -180,7 +180,7 @@
 <body>
     <div class="auth-container">
         <div class="logo-container">
-            <img src="{{ asset('images/erasebg-transformed (1).png') }}" alt="Trading Helper Bot Logo" class="logo-image" onerror="this.style.display='none';">
+            <img src="{{ asset('images/Traiding (1).svg') }}" alt="Traiding Helper Pro Logo" class="logo-image" onerror="this.style.display='none';">
         </div>
 
         <div class="auth-card">
@@ -238,9 +238,6 @@
 
             <div class="auth-link">
                 Нет аккаунта? <a href="{{ route('register') }}">Зарегистрироваться</a>
-            </div>
-            <div class="auth-link" style="margin-top: 12px;">
-                <a href="{{ route('phone.auth.show') }}" style="color: #0088cc;">📱 Войти через Telegram</a>
             </div>
         </div>
     </div>

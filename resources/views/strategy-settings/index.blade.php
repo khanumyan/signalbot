@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>Live аналитика - Trading Helper Bot</title>
+    <title>Live аналитика - Traiding Helper Pro</title>
     <style>
         * {
             margin: 0;
@@ -564,7 +564,7 @@
             <div>
                 <div style="display: flex; align-items: center; gap: 12px;">
                     <a href="/" class="back-button">← Назад</a>
-                    <img src="{{ asset('images/erasebg-transformed (1).png') }}" alt="Logo" style="width: 40px; height: 40px; object-fit: contain;">
+                    <img src="{{ asset('images/Traiding (2).svg') }}" alt="Logo" style="width: 40px; height: 40px; object-fit: contain;">
                     <div>
                         <div class="header-title">📊 Live аналитика</div>
                         <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">Настройка стратегий и живой анализ криптовалют</div>
@@ -625,9 +625,9 @@
                                 🎁 Start Free Trial
                             </button>
                         @endif
-                        <button id="buySubscriptionBtn" onclick="handleBuySubscription(event)" style="background: rgba(30, 41, 59, 0.8); border: 1px solid rgba(168, 85, 247, 0.5); border-radius: 12px; padding: 14px 28px; color: white; font-weight: bold; font-size: 16px; cursor: pointer; transition: all 0.3s ease;" onmouseover="this.style.background='rgba(30, 41, 59, 1)'" onmouseout="this.style.background='rgba(30, 41, 59, 0.8)'">
+                        <a href="{{ route('orders.index', ['from' => 'strategy-settings']) }}" style="background: rgba(30, 41, 59, 0.8); border: 1px solid rgba(168, 85, 247, 0.5); border-radius: 12px; padding: 14px 28px; color: white; font-weight: bold; font-size: 16px; cursor: pointer; transition: all 0.3s ease; text-decoration: none; display: inline-block;" onmouseover="this.style.background='rgba(30, 41, 59, 1)'" onmouseout="this.style.background='rgba(30, 41, 59, 0.8)'">
                             💳 Купить подписку
-                        </button>
+                        </a>
                     </div>
                     <div id="subscriptionMessage" style="margin-top: 16px; font-size: 14px; color: #10b981; display: none;"></div>
                 </div>
@@ -1274,79 +1274,6 @@
             });
         }
 
-        // Buy Subscription button handler for strategy-settings
-        function handleBuySubscription(e) {
-            e.preventDefault();
-            e.stopPropagation();
-            console.log('Buy Subscription button clicked');
-            
-            const btn = document.getElementById('buySubscriptionBtn');
-            const messageDiv = document.getElementById('subscriptionMessage');
-            
-            if (!btn) {
-                console.error('Buy Subscription button not found');
-                return;
-            }
-            
-            btn.disabled = true;
-            btn.style.opacity = '0.6';
-            btn.style.cursor = 'not-allowed';
-            if (messageDiv) {
-                messageDiv.style.display = 'block';
-                messageDiv.style.color = '#94a3b8';
-                messageDiv.textContent = '⏳ Оформление подписки...';
-            }
-            
-            fetch('{{ route("strategy-settings.buy-subscription") }}', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': '{{ csrf_token() }}',
-                    'X-Requested-With': 'XMLHttpRequest',
-                    'Accept': 'application/json'
-                }
-            })
-            .then(response => {
-                console.log('Response status:', response.status);
-                if (!response.ok) {
-                    return response.json().then(err => Promise.reject(err));
-                }
-                return response.json();
-            })
-            .then(data => {
-                console.log('Response data:', data);
-                if (data.success) {
-                    if (messageDiv) {
-                        messageDiv.style.color = '#10b981';
-                        messageDiv.textContent = '✅ ' + data.message + ' Действует до ' + data.subscription.date_to;
-                    }
-                    
-                    // Перезагружаем страницу через 2 секунды
-                    setTimeout(() => {
-                        window.location.reload();
-                    }, 2000);
-                } else {
-                    if (messageDiv) {
-                        messageDiv.style.color = '#ef4444';
-                        messageDiv.textContent = '❌ ' + (data.error || 'Ошибка при оформлении подписки');
-                    }
-                    btn.disabled = false;
-                    btn.style.opacity = '1';
-                    btn.style.cursor = 'pointer';
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                if (messageDiv) {
-                    messageDiv.style.color = '#ef4444';
-                    const errorMsg = error.error || error.message || 'Ошибка при оформлении подписки';
-                    messageDiv.textContent = '❌ ' + errorMsg;
-                }
-                btn.disabled = false;
-                btn.style.opacity = '1';
-                btn.style.cursor = 'pointer';
-            });
-        }
     </script>
     
     <!-- Modal Script (if not already included) -->

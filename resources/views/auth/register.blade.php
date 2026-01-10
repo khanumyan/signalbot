@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>Регистрация - Trading Helper Bot</title>
+    <title>Регистрация - Traiding Helper Pro</title>
     <style>
         * {
             margin: 0;
@@ -161,7 +161,7 @@
 <body>
     <div class="auth-container">
         <div class="logo-container">
-            <img src="{{ asset('images/erasebg-transformed (1).png') }}" alt="Trading Helper Bot Logo" class="logo-image" onerror="this.style.display='none';">
+            <img src="{{ asset('images/Traiding (1).svg') }}" alt="Traiding Helper Pro Logo" class="logo-image" onerror="this.style.display='none';">
         </div>
 
         <div class="auth-card">
@@ -244,6 +244,22 @@
                         placeholder="••••••••"
                         required
                     >
+                </div>
+
+                <div class="form-group">
+                    <label style="display: flex; align-items: flex-start; gap: 12px; cursor: pointer; color: #cbd5e1; font-size: 14px;">
+                        <input 
+                            type="checkbox" 
+                            id="terms_accepted" 
+                            name="terms_accepted" 
+                            value="1"
+                            required
+                            style="margin-top: 4px; width: 18px; height: 18px; cursor: pointer; accent-color: #a855f7;"
+                        >
+                        <span>
+                            Я ознакомился с <a href="{{ route('landing') }}#terms" target="_blank" style="color: #a855f7; text-decoration: underline;">условиями использования</a> и согласен с ними
+                        </span>
+                    </label>
                 </div>
 
                 <button type="submit" class="btn-primary">

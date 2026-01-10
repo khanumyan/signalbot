@@ -41,10 +41,13 @@ class RegisterController extends Controller
             'email' => 'required|string|email|max:255|unique:users',
             'phone' => 'required|string|regex:/^\+?[1-9]\d{1,14}$/|unique:users',
             'password' => ['required', 'confirmed', Password::defaults()],
+            'terms_accepted' => 'required|accepted',
         ], [
             'phone.required' => 'Пожалуйста, введите номер телефона',
             'phone.regex' => 'Неверный формат номера телефона. Используйте формат: +1234567890',
             'phone.unique' => 'Пользователь с этим номером телефона уже зарегистрирован',
+            'terms_accepted.required' => 'Необходимо ознакомиться с условиями использования',
+            'terms_accepted.accepted' => 'Необходимо принять условия использования',
         ]);
 
         // Generate unique verification token (8 digits with 'w' prefix)

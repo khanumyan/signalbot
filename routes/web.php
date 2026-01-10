@@ -19,10 +19,13 @@ Route::middleware('guest')->group(function () {
 // Logout route
 Route::post('/logout', [App\Http\Controllers\Auth\LoginController::class, 'logout'])->name('logout')->middleware('auth');
 
+// Public landing page
+Route::get('/', [App\Http\Controllers\LandingController::class, 'index'])->name('landing');
+
 // Protected routes (require authentication)
 Route::middleware('auth')->group(function () {
-    // Home routes
-    Route::get('/', [App\Http\Controllers\HomeController::class, 'index'])->name('home');
+    // Dashboard routes (old home)
+    Route::get('/dashboard', [App\Http\Controllers\HomeController::class, 'index'])->name('home');
     Route::get('/api/signals/stats', [App\Http\Controllers\HomeController::class, 'stats'])->name('signals.stats');
 
     // Crypto API routes
@@ -34,6 +37,9 @@ Route::middleware('auth')->group(function () {
     Route::get('/signals', [App\Http\Controllers\SignalController::class, 'index'])->name('signals.index');
     Route::get('/signals/{id}', [App\Http\Controllers\SignalController::class, 'show'])->name('signals.show');
     Route::post('/api/signals/free-trial', [App\Http\Controllers\SignalController::class, 'startFreeTrial'])->name('signals.free-trial');
+
+    // Order routes
+    Route::get('/orders', [App\Http\Controllers\OrderController::class, 'index'])->name('orders.index');
 
     // Strategy Settings routes
     Route::get('/strategy-settings', [App\Http\Controllers\StrategySettingsController::class, 'index'])->name('strategy-settings.index');

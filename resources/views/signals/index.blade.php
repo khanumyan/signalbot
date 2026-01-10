@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>История сигналов - Crypto AI Trading Bot</title>
+    <title>История сигналов - Traiding Helper Pro</title>
     <style>
         * {
             margin: 0;
@@ -272,7 +272,7 @@
             <div>
                 <div style="display: flex; align-items: center; gap: 12px;">
                     <a href="/" class="back-button">← Назад</a>
-                    <img src="{{ asset('images/erasebg-transformed (1).png') }}" alt="Logo" style="width: 40px; height: 40px; object-fit: contain;">
+                    <img src="{{ asset('images/Traiding (2).svg') }}" alt="Logo" style="width: 40px; height: 40px; object-fit: contain;">
                     <div>
                         <div class="header-title">📊 История сигналов</div>
                         <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">Все торговые сигналы</div>
@@ -309,9 +309,9 @@
                                 🎁 Start Free Trial
                             </button>
                         @endif
-                        <button id="buySubscriptionBtn" style="background: rgba(30, 41, 59, 0.8); border: 1px solid rgba(168, 85, 247, 0.5); border-radius: 12px; padding: 12px 24px; color: white; font-weight: bold; font-size: 14px; cursor: pointer; transition: all 0.3s ease;" onmouseover="this.style.background='rgba(30, 41, 59, 1)'" onmouseout="this.style.background='rgba(30, 41, 59, 0.8)'">
+                        <a href="{{ route('orders.index', ['from' => 'signals']) }}" style="background: rgba(30, 41, 59, 0.8); border: 1px solid rgba(168, 85, 247, 0.5); border-radius: 12px; padding: 12px 24px; color: white; font-weight: bold; font-size: 14px; cursor: pointer; transition: all 0.3s ease; text-decoration: none; display: inline-block;" onmouseover="this.style.background='rgba(30, 41, 59, 1)'" onmouseout="this.style.background='rgba(30, 41, 59, 0.8)'">
                             💳 Купить подписку
-                        </button>
+                        </a>
                     </div>
                     <div id="subscriptionMessage" style="margin-top: 12px; font-size: 12px; color: #10b981; display: none;"></div>
                 </div>
@@ -627,14 +627,6 @@
                 });
             }
 
-            // Buy Subscription button handler (placeholder)
-            const buySubscriptionBtn = document.getElementById('buySubscriptionBtn');
-            if (buySubscriptionBtn) {
-                buySubscriptionBtn.addEventListener('click', function() {
-                    // TODO: Реализовать логику покупки подписки
-                    alert('Функция покупки подписки будет реализована позже');
-                });
-            }
         });
     </script>
     

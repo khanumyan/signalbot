@@ -3,7 +3,7 @@
     <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Trading Helper Bot</title>
+    <title>Traiding Helper Pro</title>
     <style>
         * {
             margin: 0;
@@ -333,12 +333,12 @@
             </button>
         </form>
         <div class="logo-container">
-            <img src="{{ asset('images/erasebg-transformed (1).png') }}" alt="Trading Helper Bot Logo" class="logo-image" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+            <img src="{{ asset('images/Traiding (1).svg') }}" alt="Traiding Helper Pro Logo" class="logo-image" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
             <div style="display: none; align-items: center; justify-content: center; gap: 12px;">
                 <span style="font-size: 48px;">🤖</span>
             </div>
         </div>
-        <div class="header-title">Trading Helper Bot</div>
+        <div class="header-title">Traiding Helper Pro</div>
         <div class="header-subtitle">Автоматизированная система анализа криптовалютных рынков</div>
     </div>
 
@@ -458,7 +458,7 @@
 
     <!-- Footer -->
     <div class="footer">
-        <div>Trading Helper Bot © 2025</div>
+        <div>Traiding Helper Pro © 2025</div>
         <div style="margin-top: 8px; font-size: 12px;">Автоматизированная система торговых сигналов</div>
     </div>
 
