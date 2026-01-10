@@ -309,7 +309,7 @@
                 <div>
                     <div style="font-size: 20px; font-weight: bold; color: #a855f7;">{{ $signal->symbol }}</div>
                     <div style="font-size: 12px; color: #cbd5e1; margin-top: 4px;">Текущая цена</div>
-                    <div class="crypto-price">${{ number_format($signal->price, 2, '.', ' ') }}</div>
+                    <div class="crypto-price">${{ formatCryptoPrice($signal->price) }}</div>
                 </div>
                 <div>
                     <div class="signal-badge signal-{{ strtolower($signal->type) }}">
@@ -360,17 +360,17 @@
                 
                 <div class="level level-entry">
                     <span class="level-label" style="color: #a855f7;">💰 Вход</span>
-                    <span class="level-value">${{ number_format($signal->price, 2, '.', ' ') }}</span>
+                    <span class="level-value">${{ formatCryptoPrice($signal->price) }}</span>
                 </div>
 
                 <div class="level level-sl">
                     <span class="level-label" style="color: #f87171;">🛡️ Stop Loss</span>
-                    <span class="level-value" style="color: #f87171;">${{ number_format($signal->stop_loss, 2, '.', ' ') }}</span>
+                    <span class="level-value" style="color: #f87171;">${{ formatCryptoPrice($signal->stop_loss) }}</span>
                 </div>
 
                 <div class="level level-tp">
                     <span class="level-label" style="color: #34d399;">🎯 Take Profit</span>
-                    <span class="level-value" style="color: #34d399;">${{ number_format($signal->take_profit, 2, '.', ' ') }}</span>
+                    <span class="level-value" style="color: #34d399;">${{ formatCryptoPrice($signal->take_profit) }}</span>
                 </div>
             </div>
 

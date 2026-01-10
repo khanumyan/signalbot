@@ -190,9 +190,9 @@ class EmaRsiMacdCommand extends Command
     private function calculateSLTP(string $type, float $price, float $atr, string $strength): array
     {
         $multiplier = match($strength) {
-            'STRONG' => ['sl' => 1.5, 'tp' => 4.5], // RR 1:3
-            'MEDIUM' => ['sl' => 1.5, 'tp' => 3.0], // RR 1:2
-            default => ['sl' => 1.5, 'tp' => 2.25]  // RR 1:1.5
+            'STRONG' => ['sl' => 2.0, 'tp' => 4.5], // RR 1:2.25
+            'MEDIUM' => ['sl' => 2.0, 'tp' => 3.0], // RR 1:1.5
+            default => ['sl' => 2.0, 'tp' => 2.25]  // RR 1:1.125
         };
 
         if ($type === 'BUY') {

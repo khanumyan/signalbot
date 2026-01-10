@@ -35,7 +35,7 @@ class UserStrategySetting extends Model
                 'bb_period' => 20,
                 'bb_std_dev' => 2,
                 'atr_period' => 14,
-                'stop_loss_multiplier' => 1.5,
+                'stop_loss_multiplier' => 2.0,
                 'take_profit_multiplier' => 2.5,
             ],
             'EMA+RSI+MACD' => [
@@ -48,7 +48,7 @@ class UserStrategySetting extends Model
                 'macd_slow' => 26,
                 'macd_signal' => 9,
                 'atr_period' => 14,
-                'stop_loss_multiplier' => 1.5,
+                'stop_loss_multiplier' => 2.0,
                 'take_profit_multiplier' => 2.0,
             ],
             'Bollinger+RSI' => [
@@ -58,7 +58,7 @@ class UserStrategySetting extends Model
                 'bb_period' => 20,
                 'bb_std_dev' => 2,
                 'atr_period' => 14,
-                'stop_loss_multiplier' => 1.5,
+                'stop_loss_multiplier' => 2.0,
                 'take_profit_multiplier' => 2.0,
             ],
             'EMA+Stochastic' => [
@@ -77,7 +77,7 @@ class UserStrategySetting extends Model
                 'supertrend_period' => 10,
                 'supertrend_multiplier' => 3,
                 'atr_period' => 14,
-                'stop_loss_multiplier' => 1.5,
+                'stop_loss_multiplier' => 2.0,
                 'take_profit_multiplier' => 2.0,
             ],
             'Ichimoku+RSI' => [
@@ -90,7 +90,7 @@ class UserStrategySetting extends Model
                 'kijun_period' => 26,
                 'senkou_b_period' => 52,
                 'atr_period' => 14,
-                'stop_loss_multiplier' => 1.5,
+                'stop_loss_multiplier' => 2.0,
                 'take_profit_multiplier' => 2.0,
             ],
         ];

@@ -185,8 +185,8 @@ class BollingerRsiCommand extends Command
     private function calculateSLTP(string $type, float $price, array $bb, float $atr, string $strength): array
     {
         if ($type === 'BUY') {
-            // SL: Немного за нижней полосой или 1xATR
-            $sl = min($price - $atr, $bb['lower'] * 0.985);
+            // SL: Немного за нижней полосой или 2xATR (повышено для защиты от ложных пробоев)
+            $sl = min($price - ($atr * 2.0), $bb['lower'] * 0.98);
 
             // TP: Средняя линия BB или RR 1:1.5
             $risk = $price - $sl;
@@ -201,8 +201,8 @@ class BollingerRsiCommand extends Command
                 'take_profit' => $tp
             ];
         } else {
-            // SL: Немного за верхней полосой или 1xATR
-            $sl = max($price + $atr, $bb['upper'] * 1.015);
+            // SL: Немного за верхней полосой или 2xATR (повышено для защиты от ложных пробоев)
+            $sl = max($price + ($atr * 2.0), $bb['upper'] * 1.02);
 
             // TP: Средняя линия BB или RR 1:1.5
             $risk = $sl - $price;

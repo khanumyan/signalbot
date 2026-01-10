@@ -686,9 +686,9 @@ class CryptoAnalysisCommand extends Command
     private function calculateBuySLTP(string $strength, float $entryPrice, float $atr, array $bb): array
     {
         $multipliers = match ($strength) {
-            'STRONG' => ['sl' => 1.5, 'tp' => 3.0],
-            'MEDIUM' => ['sl' => 1.0, 'tp' => 2.0],
-            default => ['sl' => 0.7, 'tp' => 1.0]
+            'STRONG' => ['sl' => 2.0, 'tp' => 3.0],
+            'MEDIUM' => ['sl' => 1.5, 'tp' => 2.0],
+            default => ['sl' => 1.0, 'tp' => 1.0]
         };
 
         $sl = min($entryPrice - ($multipliers['sl'] * $atr), $bb['lower']);
@@ -703,9 +703,9 @@ class CryptoAnalysisCommand extends Command
     private function calculateSellSLTP(string $strength, float $entryPrice, float $atr, array $bb): array
     {
         $multipliers = match ($strength) {
-            'STRONG' => ['sl' => 1.5, 'tp' => 3.0],
-            'MEDIUM' => ['sl' => 1.0, 'tp' => 2.0],
-            default => ['sl' => 0.7, 'tp' => 1.0]
+            'STRONG' => ['sl' => 2.0, 'tp' => 3.0],
+            'MEDIUM' => ['sl' => 1.5, 'tp' => 2.0],
+            default => ['sl' => 1.0, 'tp' => 1.0]
         };
 
         $sl = max($entryPrice + ($multipliers['sl'] * $atr), $bb['upper']);

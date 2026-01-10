@@ -150,6 +150,11 @@ class StrategySettingsController extends Controller
             // Analyze based on strategy
             $result = match($strategy) {
                 'MTF' => $analysisService->analyzeMTF($symbol, $finalParams),
+                'EMA+RSI+MACD' => $analysisService->analyzeEmaRsiMacd($symbol, $finalParams),
+                'Bollinger+RSI' => $analysisService->analyzeBollingerRsi($symbol, $finalParams),
+                'EMA+Stochastic' => $analysisService->analyzeEmaStochastic($symbol, $finalParams),
+                'SuperTrend+VWAP' => $analysisService->analyzeSuperTrendVwap($symbol, $finalParams),
+                'Ichimoku+RSI' => $analysisService->analyzeIchimokuRsi($symbol, $finalParams),
                 default => throw new \Exception("Стратегия {$strategy} пока не поддерживается для анализа")
             };
 
