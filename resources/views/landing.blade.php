@@ -298,6 +298,62 @@
             color: #ffffff;
         }
 
+        /* Strategies Section */
+        .strategies {
+            padding: 80px 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .strategies-content {
+            width: 100%;
+        }
+
+        .strategies-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 24px;
+            margin-top: 40px;
+        }
+
+        .strategy-item {
+            background: rgba(30, 41, 59, 0.6);
+            border: 1px solid rgba(168, 85, 247, 0.3);
+            border-radius: 16px;
+            padding: 24px;
+            transition: all 0.3s ease;
+        }
+
+        .strategy-item:hover {
+            transform: translateY(-4px);
+            border-color: rgba(168, 85, 247, 0.6);
+            box-shadow: 0 8px 24px rgba(168, 85, 247, 0.2);
+        }
+
+        .strategy-icon {
+            font-size: 40px;
+            margin-bottom: 16px;
+        }
+
+        .strategy-name {
+            font-size: 20px;
+            font-weight: bold;
+            color: #ffffff;
+            margin-bottom: 12px;
+        }
+
+        .strategy-desc {
+            color: #cbd5e1;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        @media (max-width: 768px) {
+            .strategies-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
         /* Footer */
         .footer {
             padding: 40px 20px;
@@ -442,6 +498,52 @@
                 <li>Позволяет настраивать параметры стратегий под ваши предпочтения</li>
                 <li>Отслеживает историю всех сигналов для анализа эффективности</li>
             </ul>
+        </div>
+    </section>
+
+    <!-- Strategies Section -->
+    <section class="strategies" id="strategies">
+        <div class="strategies-content">
+            <h2 class="section-title">Торговые стратегии</h2>
+            <p class="section-subtitle">Мы используем 6 проверенных стратегий для генерации сигналов</p>
+            
+            <div class="strategies-grid">
+                <div class="strategy-item">
+                    <div class="strategy-icon">📈</div>
+                    <h3 class="strategy-name">MTF Strategy</h3>
+                    <p class="strategy-desc">Multi-TimeFrame - Мультитаймфреймовая стратегия с анализом на нескольких таймфреймах (5м, 15м, 1ч) для точного определения точек входа.</p>
+                </div>
+
+                <div class="strategy-item">
+                    <div class="strategy-icon">🧠</div>
+                    <h3 class="strategy-name">EMA + RSI + MACD</h3>
+                    <p class="strategy-desc">Универсальная трендовая стратегия, использующая пересечения EMA, импульс MACD и фильтр RSI для определения направления тренда.</p>
+                </div>
+
+                <div class="strategy-item">
+                    <div class="strategy-icon">💥</div>
+                    <h3 class="strategy-name">Bollinger Bands + RSI</h3>
+                    <p class="strategy-desc">Контртрендовая стратегия для боковых рынков, использующая отскоки от границ Bollinger Bands с подтверждением RSI.</p>
+                </div>
+
+                <div class="strategy-item">
+                    <div class="strategy-icon">⚡</div>
+                    <h3 class="strategy-name">EMA + Stochastic</h3>
+                    <p class="strategy-desc">Скальпинговая стратегия для быстрой торговли, использует пересечения EMA и выход Stochastic из зон перекупленности/перепроданности.</p>
+                </div>
+
+                <div class="strategy-item">
+                    <div class="strategy-icon">📊</div>
+                    <h3 class="strategy-name">SuperTrend + VWAP</h3>
+                    <p class="strategy-desc">Внутридневная трендовая стратегия, сочетающая индикатор SuperTrend для определения тренда и VWAP для справедливой цены.</p>
+                </div>
+
+                <div class="strategy-item">
+                    <div class="strategy-icon">🔥</div>
+                    <h3 class="strategy-name">Ichimoku + RSI</h3>
+                    <p class="strategy-desc">Трендовая стратегия с поддержкой облака Ишимоку, использует облако для определения тренда и RSI для фильтрации сигналов.</p>
+                </div>
+            </div>
         </div>
     </section>
 
