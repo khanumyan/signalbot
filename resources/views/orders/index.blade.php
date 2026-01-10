@@ -17,41 +17,56 @@
             background: linear-gradient(135deg, #0a0a0a 0%, #1a0a2e 50%, #0a0a0a 100%);
             color: #ffffff;
             min-height: 100vh;
-            padding: 20px;
         }
 
         .container {
             max-width: 800px;
             margin: 0 auto;
+            padding: 20px 16px;
         }
 
+        /* Header */
         .header {
+            position: sticky;
+            top: 0;
+            background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid rgba(168, 85, 247, 0.2);
+            padding: 16px;
+            z-index: 100;
+            margin-bottom: 24px;
+        }
+
+        .header-content {
             display: flex;
+            justify-content: space-between;
             align-items: center;
-            gap: 12px;
-            margin-bottom: 32px;
+        }
+
+        .header-title {
+            font-size: 20px;
+            font-weight: bold;
+            background: linear-gradient(to right, #a855f7, #ec4899);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
         }
 
         .back-button {
-            background: rgba(30, 41, 59, 0.8);
+            background: rgba(30, 41, 59, 0.6);
             border: 1px solid rgba(168, 85, 247, 0.3);
             border-radius: 8px;
             padding: 8px 16px;
-            color: #a855f7;
+            color: white;
             text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
             font-size: 14px;
-            transition: all 0.3s ease;
         }
 
         .back-button:hover {
-            background: rgba(168, 85, 247, 0.1);
-            border-color: #a855f7;
-        }
-
-        .logo {
-            width: 40px;
-            height: 40px;
-            object-fit: contain;
+            background: rgba(30, 41, 59, 0.8);
         }
 
         .order-card {
@@ -216,11 +231,22 @@
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <a href="{{ route($backRoute) }}" class="back-button">← Назад</a>
-            <img src="{{ asset('images/Traiding (2).svg') }}" alt="Logo" class="logo">
+    <div class="header">
+        <div class="header-content">
+            <div>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <a href="{{ route($backRoute) }}" class="back-button">← Назад</a>
+                    <img src="{{ asset('images/Traiding (2).svg') }}" alt="Logo" style="width: 40px; height: 40px; object-fit: contain;">
+                    <div>
+                        <div class="header-title">💳 Оформление подписки</div>
+                        <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">Выбор подписки</div>
+                    </div>
+                </div>
+            </div>
         </div>
+    </div>
+
+    <div class="container">
 
         <div class="order-card">
             <h1 class="order-title">Оформление подписки</h1>
