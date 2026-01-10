@@ -3,10 +3,13 @@
 namespace App\Http\Controllers;
 
 use App\Models\UserStrategySetting;
+use App\Models\Subscription;
+use App\Models\Product;
 use App\Services\CryptoAnalysisService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Session;
+use Carbon\Carbon;
 
 class StrategySettingsController extends Controller
 {
@@ -31,6 +34,26 @@ class StrategySettingsController extends Controller
     {
         $userIdentifier = $this->getUserIdentifier($request);
         
+        $user = auth()->user();
+        $hasActiveSubscription = false;
+        $hasFreeTrialUsed = false;
+        
+        if ($user) {
+            // Проверяем наличие активной подписки для strategy-settings (product_id = 2 или 5)
+            // product_id = 2 - полная подписка, product_id = 5 - free trial
+            $hasActiveSubscription = Subscription::where('user_id', $user->id)
+                ->whereIn('product_id', [2, 5])
+                ->where('status', 'active')
+                ->where('date_from', '<=', now())
+                ->where('date_to', '>=', now())
+                ->exists();
+            
+            // Проверяем, использовал ли пользователь free trial для strategy-settings (product_id = 5)
+            $hasFreeTrialUsed = Subscription::where('user_id', $user->id)
+                ->where('product_id', 5)
+                ->exists();
+        }
+        
         $strategies = [
             'MTF' => 'Multi-TimeFrame Strategy',
             'EMA+RSI+MACD' => 'EMA + RSI + MACD Strategy',
@@ -52,7 +75,7 @@ class StrategySettingsController extends Controller
             ];
         }
 
-        return view('strategy-settings.index', compact('settings', 'strategies'));
+        return view('strategy-settings.index', compact('settings', 'strategies', 'hasActiveSubscription', 'hasFreeTrialUsed'));
     }
 
     /**
@@ -167,6 +190,136 @@ class StrategySettingsController extends Controller
             return response()->json([
                 'success' => false,
                 'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Start free trial subscription for strategy-settings (product_id = 5)
+     */
+    public function startFreeTrial(Request $request): JsonResponse
+    {
+        $user = auth()->user();
+        
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Необходима авторизация'
+            ], 401);
+        }
+
+        // Проверяем, использовал ли пользователь уже free trial для strategy-settings
+        $hasFreeTrialUsed = Subscription::where('user_id', $user->id)
+            ->where('product_id', 5)
+            ->exists();
+
+        if ($hasFreeTrialUsed) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Бесплатный пробный период уже был использован'
+            ], 400);
+        }
+
+        try {
+            // Получаем продукт free trial для strategy-settings (product_id = 5)
+            $product = Product::find(5);
+            
+            if (!$product) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Продукт для бесплатного пробного периода не найден'
+                ], 404);
+            }
+
+            // Используем duration из продукта (в днях)
+            $duration = $product->duration ?? 3; // По умолчанию 3 дня, если duration не указан
+            
+            // Создаем free trial подписку
+            $dateFrom = Carbon::now();
+            $dateTo = Carbon::now()->addDays($duration);
+
+            $subscription = Subscription::create([
+                'user_id' => $user->id,
+                'product_id' => 5,
+                'status' => 'active',
+                'date_from' => $dateFrom->format('Y-m-d'),
+                'date_to' => $dateTo->format('Y-m-d'),
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Бесплатный пробный период активирован на ' . $duration . ' ' . ($duration == 1 ? 'день' : ($duration < 5 ? 'дня' : 'дней')) . '!',
+                'subscription' => [
+                    'id' => $subscription->id,
+                    'date_from' => $subscription->date_from_formatted,
+                    'date_to' => $subscription->date_to_formatted,
+                    'duration' => $duration,
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Ошибка при создании подписки: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Buy full subscription for strategy-settings (product_id = 2)
+     */
+    public function buySubscription(Request $request): JsonResponse
+    {
+        $user = auth()->user();
+        
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Необходима авторизация'
+            ], 401);
+        }
+
+        try {
+            // Получаем продукт полной подписки (product_id = 2)
+            $product = Product::find(2);
+            
+            if (!$product) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Продукт для полной подписки не найден'
+                ], 404);
+            }
+
+            // Используем duration из продукта (в днях)
+            $duration = $product->duration ?? 30; // По умолчанию 30 дней, если duration не указан
+            
+            // Создаем полную подписку
+            $dateFrom = Carbon::now();
+            $dateTo = Carbon::now()->addDays($duration);
+
+            $subscription = Subscription::create([
+                'user_id' => $user->id,
+                'product_id' => 2,
+                'status' => 'active',
+                'date_from' => $dateFrom->format('Y-m-d'),
+                'date_to' => $dateTo->format('Y-m-d'),
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Подписка активирована на ' . $duration . ' ' . ($duration == 1 ? 'день' : ($duration < 5 ? 'дня' : 'дней')) . '!',
+                'subscription' => [
+                    'id' => $subscription->id,
+                    'date_from' => $subscription->date_from_formatted,
+                    'date_to' => $subscription->date_to_formatted,
+                    'duration' => $duration,
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Ошибка при создании подписки: ' . $e->getMessage()
             ], 500);
         }
     }

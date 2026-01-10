@@ -33,6 +33,7 @@ Route::middleware('auth')->group(function () {
     // Signal routes
     Route::get('/signals', [App\Http\Controllers\SignalController::class, 'index'])->name('signals.index');
     Route::get('/signals/{id}', [App\Http\Controllers\SignalController::class, 'show'])->name('signals.show');
+    Route::post('/api/signals/free-trial', [App\Http\Controllers\SignalController::class, 'startFreeTrial'])->name('signals.free-trial');
 
     // Strategy Settings routes
     Route::get('/strategy-settings', [App\Http\Controllers\StrategySettingsController::class, 'index'])->name('strategy-settings.index');
@@ -40,6 +41,8 @@ Route::middleware('auth')->group(function () {
     Route::post('/strategy-settings/{strategyName}/reset', [App\Http\Controllers\StrategySettingsController::class, 'reset'])->name('strategy-settings.reset');
     Route::get('/api/strategy-settings/{strategyName}', [App\Http\Controllers\StrategySettingsController::class, 'get'])->name('strategy-settings.get');
     Route::post('/api/strategy-analysis/analyze', [App\Http\Controllers\StrategySettingsController::class, 'analyze'])->name('strategy-analysis.analyze');
+    Route::post('/api/strategy-settings/free-trial', [App\Http\Controllers\StrategySettingsController::class, 'startFreeTrial'])->name('strategy-settings.free-trial');
+    Route::post('/api/strategy-settings/buy-subscription', [App\Http\Controllers\StrategySettingsController::class, 'buySubscription'])->name('strategy-settings.buy-subscription');
 
     // Chart Analysis routes
     Route::get('/chart-analysis', [App\Http\Controllers\ChartAnalysisController::class, 'index'])->name('chart-analysis.index');

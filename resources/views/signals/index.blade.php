@@ -259,6 +259,10 @@
         #signalsContainer {
             min-height: 200px;
         }
+
+        .hidden {
+            display: none !important;
+        }
     </style>
 </head>
 <body>
@@ -289,6 +293,31 @@
 
     <!-- Main Content -->
     <div class="container">
+        @if(!$hasActiveSubscription)
+            <!-- Subscription Banner -->
+            <div class="card" style="background: linear-gradient(135deg, rgba(147, 51, 234, 0.3) 0%, rgba(236, 72, 153, 0.3) 100%); border: 2px solid rgba(168, 85, 247, 0.5); margin-bottom: 20px;">
+                <div style="text-align: center; padding: 8px 0;">
+                    <div style="font-size: 18px; font-weight: bold; margin-bottom: 12px; background: linear-gradient(to right, #a855f7, #ec4899); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+                        🔒 Премиум доступ
+                    </div>
+                    <div style="font-size: 14px; color: #94a3b8; margin-bottom: 16px;">
+                        Сигналы за сегодня и вчера доступны только подписчикам
+                    </div>
+                    <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+                        @if(!$hasFreeTrialUsed)
+                            <button id="startFreeTrialBtn" style="background: linear-gradient(to right, #9333ea, #db2777); border: none; border-radius: 12px; padding: 12px 24px; color: white; font-weight: bold; font-size: 14px; cursor: pointer; transition: all 0.3s ease;" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+                                🎁 Start Free Trial
+                            </button>
+                        @endif
+                        <button id="buySubscriptionBtn" style="background: rgba(30, 41, 59, 0.8); border: 1px solid rgba(168, 85, 247, 0.5); border-radius: 12px; padding: 12px 24px; color: white; font-weight: bold; font-size: 14px; cursor: pointer; transition: all 0.3s ease;" onmouseover="this.style.background='rgba(30, 41, 59, 1)'" onmouseout="this.style.background='rgba(30, 41, 59, 0.8)'">
+                            💳 Купить подписку
+                        </button>
+                    </div>
+                    <div id="subscriptionMessage" style="margin-top: 12px; font-size: 12px; color: #10b981; display: none;"></div>
+                </div>
+            </div>
+        @endif
+
         <div id="signalsContainer">
             @if($signals->count() > 0)
                 @foreach($signals as $signal)
@@ -329,7 +358,13 @@
                 <div class="empty-state">
                     <div class="empty-icon">📊</div>
                     <div class="empty-state-text">Нет сигналов</div>
-                    <div class="empty-state-subtext">Сигналы появятся после анализа рынка</div>
+                    <div class="empty-state-subtext">
+                        @if(!$hasActiveSubscription)
+                            Показываются только сигналы со статусами (завершенные/пропущенные) старше вчера. Активируйте подписку для доступа к свежим сигналам.
+                        @else
+                            Сигналы появятся после анализа рынка
+                        @endif
+                    </div>
                 </div>
             @endif
         </div>
@@ -345,6 +380,8 @@
         let currentPage = 1;
         let isLoading = false;
         let hasMore = {{ $hasMore ? 'true' : 'false' }};
+        let hasActiveSubscription = {{ $hasActiveSubscription ? 'true' : 'false' }};
+        let hasFreeTrialUsed = {{ $hasFreeTrialUsed ? 'true' : 'false' }};
         const perPage = 50;
 
         // Set active filter button
@@ -396,6 +433,14 @@
             })
             .then(response => response.json())
             .then(data => {
+                // Обновляем статус подписки из ответа
+                if (data.hasActiveSubscription !== undefined) {
+                    hasActiveSubscription = data.hasActiveSubscription;
+                }
+                if (data.hasFreeTrialUsed !== undefined) {
+                    hasFreeTrialUsed = data.hasFreeTrialUsed;
+                }
+                
                 if (data.signals && data.signals.length > 0) {
                     const container = document.getElementById('signalsContainer');
                     
@@ -409,11 +454,14 @@
                 } else {
                     hasMore = false;
                     if (currentPage === 1) {
+                        const emptyMessage = !hasActiveSubscription 
+                            ? 'Показываются только сигналы со статусами (завершенные/пропущенные) старше вчера. Активируйте подписку для доступа к свежим сигналам.'
+                            : 'Сигналы появятся после анализа рынка';
                         document.getElementById('signalsContainer').innerHTML = `
                             <div class="empty-state">
                                 <div class="empty-icon">📊</div>
                                 <div class="empty-state-text">Нет сигналов</div>
-                                <div class="empty-state-subtext">Сигналы появятся после анализа рынка</div>
+                                <div class="empty-state-subtext">${emptyMessage}</div>
                             </div>
                         `;
                     }
@@ -518,6 +566,76 @@
                 }, 500);
             });
         @endif
+
+        // Start Free Trial button handler - проверяем наличие кнопки, так как она показывается только если !$hasFreeTrialUsed
+        document.addEventListener('DOMContentLoaded', function() {
+            const startFreeTrialBtn = document.getElementById('startFreeTrialBtn');
+            if (startFreeTrialBtn) {
+                startFreeTrialBtn.addEventListener('click', function() {
+                    const btn = this;
+                    const messageDiv = document.getElementById('subscriptionMessage');
+                    
+                    btn.disabled = true;
+                    btn.style.opacity = '0.6';
+                    btn.style.cursor = 'not-allowed';
+                    if (messageDiv) {
+                        messageDiv.style.display = 'block';
+                        messageDiv.style.color = '#94a3b8';
+                        messageDiv.textContent = '⏳ Активация пробного периода...';
+                    }
+                    
+                    fetch('{{ route("signals.free-trial") }}', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                            'X-Requested-With': 'XMLHttpRequest'
+                        }
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            if (messageDiv) {
+                                messageDiv.style.color = '#10b981';
+                                messageDiv.textContent = '✅ ' + data.message + ' Действует до ' + data.subscription.date_to;
+                            }
+                            
+                            // Перезагружаем страницу через 1.5 секунды, чтобы баннер исчез
+                            setTimeout(() => {
+                                window.location.reload();
+                            }, 1500);
+                        } else {
+                            if (messageDiv) {
+                                messageDiv.style.color = '#ef4444';
+                                messageDiv.textContent = '❌ ' + (data.error || 'Ошибка при активации');
+                            }
+                            btn.disabled = false;
+                            btn.style.opacity = '1';
+                            btn.style.cursor = 'pointer';
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        if (messageDiv) {
+                            messageDiv.style.color = '#ef4444';
+                            messageDiv.textContent = '❌ Ошибка при активации пробного периода';
+                        }
+                        btn.disabled = false;
+                        btn.style.opacity = '1';
+                        btn.style.cursor = 'pointer';
+                    });
+                });
+            }
+
+            // Buy Subscription button handler (placeholder)
+            const buySubscriptionBtn = document.getElementById('buySubscriptionBtn');
+            if (buySubscriptionBtn) {
+                buySubscriptionBtn.addEventListener('click', function() {
+                    // TODO: Реализовать логику покупки подписки
+                    alert('Функция покупки подписки будет реализована позже');
+                });
+            }
+        });
     </script>
     
     <!-- Modal Script -->

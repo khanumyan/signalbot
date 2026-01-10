@@ -573,7 +573,8 @@
             </div>
         </div>
         
-        <!-- Main Tabs -->
+        <!-- Main Tabs - показываем только если есть подписка -->
+        @if($hasActiveSubscription)
         <div class="main-tabs">
             <button class="main-tab active" onclick="switchMainTab('settings')">
                 ⚙️ Настройки стратегий
@@ -582,6 +583,7 @@
                 📊 Анализ
             </button>
         </div>
+        @endif
     </div>
 
     <!-- Notification -->
@@ -606,73 +608,98 @@
 
     <!-- Main Content -->
     <div class="container">
-        <!-- Settings Tab Content -->
-        <div id="main-settings" class="main-content active">
-            <!-- Strategy Tabs -->
-            <div class="strategy-tabs">
-                @foreach($strategies as $strategyName => $strategyTitle)
-                    <button class="strategy-tab {{ $loop->first ? 'active' : '' }}" 
-                            data-strategy="{{ $strategyName }}" 
-                            onclick="switchStrategy('{{ $strategyName }}')">
-                        {{ $strategyTitle }}
-                    </button>
+        @if(!$hasActiveSubscription)
+            <!-- Subscription Banner - показываем только баннер, если нет подписки -->
+            <div class="card" style="background: linear-gradient(135deg, rgba(147, 51, 234, 0.3) 0%, rgba(236, 72, 153, 0.3) 100%); border: 2px solid rgba(168, 85, 247, 0.5); margin-bottom: 20px; margin-top: 20px;">
+                <div style="text-align: center; padding: 24px 16px;">
+                    <div style="font-size: 24px; font-weight: bold; margin-bottom: 16px; background: linear-gradient(to right, #a855f7, #ec4899); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+                        🔒 Премиум доступ к Live аналитике
+                    </div>
+                    <div style="font-size: 16px; color: #94a3b8; margin-bottom: 24px; line-height: 1.6;">
+                        Получите полный доступ к настройке стратегий и анализу криптовалют<br>
+                        Настройте параметры торговых стратегий под себя и получайте персонализированные сигналы
+                    </div>
+                    <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+                        @if(!$hasFreeTrialUsed)
+                            <button id="startFreeTrialBtn" onclick="handleStartFreeTrial(event)" style="background: linear-gradient(to right, #9333ea, #db2777); border: none; border-radius: 12px; padding: 14px 28px; color: white; font-weight: bold; font-size: 16px; cursor: pointer; transition: all 0.3s ease;" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+                                🎁 Start Free Trial
+                            </button>
+                        @endif
+                        <button id="buySubscriptionBtn" onclick="handleBuySubscription(event)" style="background: rgba(30, 41, 59, 0.8); border: 1px solid rgba(168, 85, 247, 0.5); border-radius: 12px; padding: 14px 28px; color: white; font-weight: bold; font-size: 16px; cursor: pointer; transition: all 0.3s ease;" onmouseover="this.style.background='rgba(30, 41, 59, 1)'" onmouseout="this.style.background='rgba(30, 41, 59, 0.8)'">
+                            💳 Купить подписку
+                        </button>
+                    </div>
+                    <div id="subscriptionMessage" style="margin-top: 16px; font-size: 14px; color: #10b981; display: none;"></div>
+                </div>
+            </div>
+        @else
+            <!-- Settings Tab Content - показываем только если есть подписка -->
+            <div id="main-settings" class="main-content active">
+                <!-- Strategy Tabs -->
+                <div class="strategy-tabs">
+                    @foreach($strategies as $strategyName => $strategyTitle)
+                        <button class="strategy-tab {{ $loop->first ? 'active' : '' }}" 
+                                data-strategy="{{ $strategyName }}" 
+                                onclick="switchStrategy('{{ $strategyName }}')">
+                            {{ $strategyTitle }}
+                        </button>
+                    @endforeach
+                </div>
+
+                @foreach($settings as $strategyName => $setting)
+                    <div class="strategy-content {{ $loop->first ? 'active' : '' }}" id="strategy-{{ $strategyName }}">
+                    <div class="card">
+                        <div class="card-title">
+                            <span>{{ $strategies[$strategyName] }}</span>
+                            <label class="toggle-switch">
+                                <input type="checkbox" 
+                                       id="toggle-{{ $strategyName }}" 
+                                       {{ $setting['is_active'] ? 'checked' : '' }}
+                                       onchange="toggleStrategy('{{ $strategyName }}', this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+
+                        <div class="info-box">
+                            ⚠️ Эти параметры используются для генерации пользовательских сигналов. Системные параметры (например, RSI 20 для аналитики) остаются без изменений.
+                        </div>
+
+                        <form id="form-{{ $strategyName }}" onsubmit="saveSettings(event, '{{ $strategyName }}')">
+                            <div class="form-grid">
+                                @foreach($setting['parameters'] as $key => $value)
+                                    <div class="input-group">
+                                        <label class="input-label">
+                                            {{ ucfirst(str_replace('_', ' ', $key)) }}
+                                            <span class="default-value">
+                                                (по умолчанию: {{ $setting['defaults'][$key] ?? 'N/A' }})
+                                            </span>
+                                        </label>
+                                        <input type="number" 
+                                               class="input" 
+                                               name="parameters[{{ $key }}]"
+                                               value="{{ $value }}"
+                                               step="0.01"
+                                               placeholder="{{ $setting['defaults'][$key] ?? '' }}">
+                                    </div>
+                                @endforeach
+                            </div>
+
+                            <div class="btn-group">
+                                <button type="submit" class="btn btn-primary">
+                                    💾 Сохранить настройки
+                                </button>
+                                <button type="button" class="btn btn-secondary" onclick="resetStrategy('{{ $strategyName }}')">
+                                    🔄 Сбросить к умолчанию
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
                 @endforeach
             </div>
 
-            @foreach($settings as $strategyName => $setting)
-                <div class="strategy-content {{ $loop->first ? 'active' : '' }}" id="strategy-{{ $strategyName }}">
-                <div class="card">
-                    <div class="card-title">
-                        <span>{{ $strategies[$strategyName] }}</span>
-                        <label class="toggle-switch">
-                            <input type="checkbox" 
-                                   id="toggle-{{ $strategyName }}" 
-                                   {{ $setting['is_active'] ? 'checked' : '' }}
-                                   onchange="toggleStrategy('{{ $strategyName }}', this.checked)">
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-
-                    <div class="info-box">
-                        ⚠️ Эти параметры используются для генерации пользовательских сигналов. Системные параметры (например, RSI 20 для аналитики) остаются без изменений.
-                    </div>
-
-                    <form id="form-{{ $strategyName }}" onsubmit="saveSettings(event, '{{ $strategyName }}')">
-                        <div class="form-grid">
-                            @foreach($setting['parameters'] as $key => $value)
-                                <div class="input-group">
-                                    <label class="input-label">
-                                        {{ ucfirst(str_replace('_', ' ', $key)) }}
-                                        <span class="default-value">
-                                            (по умолчанию: {{ $setting['defaults'][$key] ?? 'N/A' }})
-                                        </span>
-                                    </label>
-                                    <input type="number" 
-                                           class="input" 
-                                           name="parameters[{{ $key }}]"
-                                           value="{{ $value }}"
-                                           step="0.01"
-                                           placeholder="{{ $setting['defaults'][$key] ?? '' }}">
-                                </div>
-                            @endforeach
-                        </div>
-
-                        <div class="btn-group">
-                            <button type="submit" class="btn btn-primary">
-                                💾 Сохранить настройки
-                            </button>
-                            <button type="button" class="btn btn-secondary" onclick="resetStrategy('{{ $strategyName }}')">
-                                🔄 Сбросить к умолчанию
-                            </button>
-                        </div>
-                    </form>
-                </div>
-            </div>
-            @endforeach
-        </div>
-
-        <!-- Analysis Tab Content -->
-        <div id="main-analysis" class="main-content">
+            <!-- Analysis Tab Content -->
+            <div id="main-analysis" class="main-content">
             <div class="analysis-form">
                 <div class="card-title">📊 Анализ криптовалюты</div>
                 
@@ -710,6 +737,7 @@
             <!-- Analysis Result -->
             <div id="analysisResult" class="hidden"></div>
         </div>
+        @endif
     </div>
 
     <script src="https://s3.tradingview.com/tv.js"></script>
@@ -1167,6 +1195,157 @@
                     showModal('warning', 'Предупреждение', 'Не удалось загрузить график TradingView. Попробуйте обновить страницу.', null, true);
                 }
             }, 100);
+        }
+
+        // Start Free Trial button handler for strategy-settings
+        function handleStartFreeTrial(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Start Free Trial button clicked');
+            
+            const btn = document.getElementById('startFreeTrialBtn');
+            const messageDiv = document.getElementById('subscriptionMessage');
+            
+            if (!btn) {
+                console.error('Start Free Trial button not found');
+                return;
+            }
+            
+            btn.disabled = true;
+            btn.style.opacity = '0.6';
+            btn.style.cursor = 'not-allowed';
+            if (messageDiv) {
+                messageDiv.style.display = 'block';
+                messageDiv.style.color = '#94a3b8';
+                messageDiv.textContent = '⏳ Активация пробного периода...';
+            }
+            
+            fetch('{{ route("strategy-settings.free-trial") }}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Accept': 'application/json'
+                }
+            })
+            .then(response => {
+                console.log('Response status:', response.status);
+                if (!response.ok) {
+                    return response.json().then(err => Promise.reject(err));
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('Response data:', data);
+                if (data.success) {
+                    if (messageDiv) {
+                        messageDiv.style.color = '#10b981';
+                        messageDiv.textContent = '✅ ' + data.message + ' Действует до ' + data.subscription.date_to;
+                    }
+                    
+                    // Скрываем кнопку Start Free Trial
+                    btn.style.display = 'none';
+                    
+                    // Перезагружаем страницу через 2 секунды
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 2000);
+                } else {
+                    if (messageDiv) {
+                        messageDiv.style.color = '#ef4444';
+                        messageDiv.textContent = '❌ ' + (data.error || 'Ошибка при активации');
+                    }
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
+                    btn.style.cursor = 'pointer';
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                if (messageDiv) {
+                    messageDiv.style.color = '#ef4444';
+                    const errorMsg = error.error || error.message || 'Ошибка при активации пробного периода';
+                    messageDiv.textContent = '❌ ' + errorMsg;
+                }
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                btn.style.cursor = 'pointer';
+            });
+        }
+
+        // Buy Subscription button handler for strategy-settings
+        function handleBuySubscription(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Buy Subscription button clicked');
+            
+            const btn = document.getElementById('buySubscriptionBtn');
+            const messageDiv = document.getElementById('subscriptionMessage');
+            
+            if (!btn) {
+                console.error('Buy Subscription button not found');
+                return;
+            }
+            
+            btn.disabled = true;
+            btn.style.opacity = '0.6';
+            btn.style.cursor = 'not-allowed';
+            if (messageDiv) {
+                messageDiv.style.display = 'block';
+                messageDiv.style.color = '#94a3b8';
+                messageDiv.textContent = '⏳ Оформление подписки...';
+            }
+            
+            fetch('{{ route("strategy-settings.buy-subscription") }}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Accept': 'application/json'
+                }
+            })
+            .then(response => {
+                console.log('Response status:', response.status);
+                if (!response.ok) {
+                    return response.json().then(err => Promise.reject(err));
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('Response data:', data);
+                if (data.success) {
+                    if (messageDiv) {
+                        messageDiv.style.color = '#10b981';
+                        messageDiv.textContent = '✅ ' + data.message + ' Действует до ' + data.subscription.date_to;
+                    }
+                    
+                    // Перезагружаем страницу через 2 секунды
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 2000);
+                } else {
+                    if (messageDiv) {
+                        messageDiv.style.color = '#ef4444';
+                        messageDiv.textContent = '❌ ' + (data.error || 'Ошибка при оформлении подписки');
+                    }
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
+                    btn.style.cursor = 'pointer';
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                if (messageDiv) {
+                    messageDiv.style.color = '#ef4444';
+                    const errorMsg = error.error || error.message || 'Ошибка при оформлении подписки';
+                    messageDiv.textContent = '❌ ' + errorMsg;
+                }
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                btn.style.cursor = 'pointer';
+            });
         }
     </script>
     
