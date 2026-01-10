@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Models\User;
+use App\Models\Subscription;
 use Telegram\Bot\Api;
 use Telegram\Bot\Exceptions\TelegramSDKException;
 use Illuminate\Support\Facades\Log;
@@ -387,10 +389,32 @@ class TelegramService
 
     protected function sendToInstantBotSafe(string $message): bool
     {
-        $successCount = 0;
-        $totalChats = count($this->instantChatIds);
+        // Получаем пользователей с активными подписками (product_id = 1, 2, 4, 5)
+        // Проверяем: status = 'active', product_id IN (1, 2, 4, 5), date_from <= now(), date_to >= now()
+        $activeUsers = User::whereHas('subscriptions', function ($query) {
+                $query->where('status', 'active')
+                      ->whereIn('product_id', [1, 2, 4, 5])
+                      ->where('date_from', '<=', now())
+                      ->where('date_to', '>=', now());
+            })
+            ->whereNotNull('telegram_chat_id')
+            ->where('telegram_chat_id', '!=', '')
+            ->pluck('telegram_chat_id')
+            ->unique()
+            ->values()
+            ->toArray();
 
-        foreach ($this->instantChatIds as $chatId) {
+        if (empty($activeUsers)) {
+            Log::info('No active subscriptions found for signal delivery');
+            return false;
+        }
+
+        $successCount = 0;
+        $totalChats = count($activeUsers);
+
+        Log::info("Sending signal to {$totalChats} users with active subscriptions");
+
+        foreach ($activeUsers as $chatId) {
             try {
                 $this->instantTelegram->sendMessage([
                     'chat_id' => $chatId,
@@ -399,11 +423,15 @@ class TelegramService
                 ]);
                 Log::info("Instant signal sent successfully to chat {$chatId}");
                 $successCount++;
+                // Небольшая задержка между отправками, чтобы не превысить лимиты API
+                usleep(50000); // 50ms задержка
             } catch (TelegramSDKException $e) {
                 Log::warning("Failed to send instant signal to chat {$chatId}: " . $e->getMessage());
                 // Не прерываем работу, продолжаем отправку другим чатам
             }
         }
+
+        Log::info("Signal delivery completed: {$successCount}/{$totalChats} successful");
 
         // Возвращаем true если хотя бы один чат получил сообщение
         return $successCount > 0;
