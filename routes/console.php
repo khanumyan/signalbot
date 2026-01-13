@@ -17,7 +17,7 @@ Artisan::command('inspire', function () {
 | 2. crypto:ema-rsi-macd      - 🧠 EMA + RSI + MACD (universal trend-following)
 | 3. crypto:bollinger-rsi     - 💥 Bollinger Bands + RSI (counter-trend bounces)
 | 4. crypto:ema-stochastic    - ⚡ EMA(9/21) + Stochastic (impulse scalping)
-| 5. crypto:supertrend-vwap   - 📊 SuperTrend + VWAP (intraday trending)
+|| 5. crypto:supertrend-vwap   - 📊 SuperTrend + VWAP (intraday trending) [ВРЕМЕННО ОТКЛЮЧЕНО]
 | 6. crypto:ichimoku-rsi      - 🔥 Ichimoku + RSI (trend with cloud support)
 |
 | All commands support options: --symbol, --interval, --telegram, --telegram-only
@@ -53,11 +53,12 @@ Schedule::command('crypto:ema-stochastic --telegram-only --interval=5m')
     ->appendOutputTo(storage_path('logs/crypto_analysis.log'));
 
 // SuperTrend + VWAP strategy - каждые 30 минут
-Schedule::command('crypto:supertrend-vwap --telegram-only')
-    ->cron('*/30 * * * *')
-    ->withoutOverlapping()
-    ->runInBackground()
-    ->appendOutputTo(storage_path('logs/crypto_analysis.log'));
+// ВРЕМЕННО ОТКЛЮЧЕНО
+// Schedule::command('crypto:supertrend-vwap --telegram-only')
+//     ->cron('*/30 * * * *')
+//     ->withoutOverlapping()
+//     ->runInBackground()
+//     ->appendOutputTo(storage_path('logs/crypto_analysis.log'));
 
 // Ichimoku + RSI strategy - каждый час
 Schedule::command('crypto:ichimoku-rsi --telegram-only --interval=1h')
