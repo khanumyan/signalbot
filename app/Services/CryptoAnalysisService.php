@@ -403,20 +403,21 @@ class CryptoAnalysisService
             $reasons[] = "Price " . ($signal === 'BUY' ? 'above' : 'below') . " EMA{$emaFast}";
         }
 
+        // Return exact values (no rounding) - database supports decimal(20, 10)
         return [
-            'price' => round($price, 2),
-            'rsi' => round($rsi, 2),
-            'ema_fast' => round($ema20, 2),
-            'ema_slow' => round($ema50, 2),
-            'macd' => round($macdLine, 4),
-            'macd_signal' => round($macdSignalLine, 4),
-            'macd_histogram' => round($macdHist, 4),
-            'atr' => round($atr, 2),
+            'price' => $price, // Exact price from provider, no rounding
+            'rsi' => $rsi,
+            'ema_fast' => $ema20,
+            'ema_slow' => $ema50,
+            'macd' => $macdLine,
+            'macd_signal' => $macdSignalLine,
+            'macd_histogram' => $macdHist,
+            'atr' => $atr,
             'signal' => $signal,
             'long_probability' => $longProb,
             'short_probability' => $shortProb,
-            'stop_loss' => round($stopLoss, 2),
-            'take_profit' => round($takeProfit, 2),
+            'stop_loss' => $stopLoss, // Exact value, no rounding
+            'take_profit' => $takeProfit, // Exact value, no rounding
             'reason' => implode('. ', $reasons),
             'strength' => abs($longProb - $shortProb) > 20 ? 'STRONG' : (abs($longProb - $shortProb) > 10 ? 'MEDIUM' : 'WEAK')
         ];
@@ -552,18 +553,19 @@ class CryptoAnalysisService
             $reasons[] = "RSI {$rsi} в нейтральной зоне";
         }
 
+        // Return exact values (no rounding) - database supports decimal(20, 10)
         return [
-            'price' => round($price, 2),
-            'rsi' => round($rsi, 2),
-            'bb_upper' => round($bb['upper'], 2),
-            'bb_middle' => round($bb['middle'], 2),
-            'bb_lower' => round($bb['lower'], 2),
-            'atr' => round($atr, 2),
+            'price' => $price, // Exact price from provider, no rounding
+            'rsi' => $rsi,
+            'bb_upper' => $bb['upper'],
+            'bb_middle' => $bb['middle'],
+            'bb_lower' => $bb['lower'],
+            'atr' => $atr,
             'signal' => $signal,
             'long_probability' => $longProb,
             'short_probability' => $shortProb,
-            'stop_loss' => round($stopLoss, 2),
-            'take_profit' => round($takeProfit, 2),
+            'stop_loss' => $stopLoss, // Exact value, no rounding
+            'take_profit' => $takeProfit, // Exact value, no rounding
             'reason' => implode('. ', $reasons),
             'strength' => abs($longProb - $shortProb) > 20 ? 'STRONG' : (abs($longProb - $shortProb) > 10 ? 'MEDIUM' : 'WEAK')
         ];
@@ -715,19 +717,20 @@ class CryptoAnalysisService
             $reasons[] = "Price " . ($signal === 'BUY' ? 'above' : 'below') . " EMA{$emaFast}";
         }
 
+        // Return exact values (no rounding) - database supports decimal(20, 10)
         return [
-            'price' => round($price, 2),
+            'price' => $price, // Exact price from provider, no rounding
             'rsi' => 50.0, // Not used in this strategy
-            'ema_fast' => round($ema9, 2),
-            'ema_slow' => round($ema21, 2),
-            'stochastic_k' => round($k, 2),
-            'stochastic_d' => round($d, 2),
-            'atr' => round($atr, 2),
+            'ema_fast' => $ema9,
+            'ema_slow' => $ema21,
+            'stochastic_k' => $k,
+            'stochastic_d' => $d,
+            'atr' => $atr,
             'signal' => $signal,
             'long_probability' => $longProb,
             'short_probability' => $shortProb,
-            'stop_loss' => round($stopLoss, 2),
-            'take_profit' => round($takeProfit, 2),
+            'stop_loss' => $stopLoss, // Exact value, no rounding
+            'take_profit' => $takeProfit, // Exact value, no rounding
             'reason' => implode('. ', $reasons),
             'strength' => $strength
         ];
@@ -919,7 +922,7 @@ class CryptoAnalysisService
             $signal = 'HOLD';
         }
 
-        // Calculate SL/TP
+        // Calculate SL/TP based on original price (no rounding for database)
         $stopLossMultiplier = $params['stop_loss_multiplier'] ?? 2.0;
         $takeProfitMultiplier = $params['take_profit_multiplier'] ?? 2.0;
 
@@ -934,30 +937,52 @@ class CryptoAnalysisService
             $takeProfit = $price;
         }
 
+        // Determine precision for display only (not for database)
+        $precision = $this->getPricePrecision($price);
+
         // Generate reason
         $reasons = [];
         $reasons[] = "SuperTrend: {$trend} тренд";
-        $reasons[] = "VWAP: " . number_format($vwap, 2);
+        $reasons[] = "VWAP: " . number_format($vwap, $precision);
         $reasons[] = "Цена " . ($priceToVwapPercent >= 0 ? 'выше' : 'ниже') . " VWAP на " . number_format(abs($priceToVwapPercent), 2) . "%";
         if ($signal !== 'HOLD') {
             $reasons[] = "Цена " . ($signal === 'BUY' ? 'выше' : 'ниже') . " SuperTrend";
         }
 
+        // Return exact values (no rounding) - database supports decimal(20, 10)
+        // Price, stop_loss, take_profit will be saved exactly as calculated
         return [
-            'price' => round($price, 2),
-            'supertrend_value' => round($superTrend['value'], 2),
+            'price' => $price, // Exact price from provider, no rounding
+            'supertrend_value' => $superTrend['value'],
             'supertrend_trend' => $trend,
-            'vwap' => round($vwap, 2),
-            'price_to_vwap_percent' => round($priceToVwapPercent, 2),
-            'atr' => round($atr, 2),
+            'vwap' => $vwap,
+            'price_to_vwap_percent' => $priceToVwapPercent,
+            'atr' => $atr,
             'signal' => $signal,
             'long_probability' => $longProb,
             'short_probability' => $shortProb,
-            'stop_loss' => round($stopLoss, 2),
-            'take_profit' => round($takeProfit, 2),
+            'stop_loss' => $stopLoss, // Exact value, no rounding
+            'take_profit' => $takeProfit, // Exact value, no rounding
             'reason' => implode('. ', $reasons),
             'strength' => abs($longProb - $shortProb) > 20 ? 'STRONG' : (abs($longProb - $shortProb) > 10 ? 'MEDIUM' : 'WEAK')
         ];
+    }
+
+    /**
+     * Determine appropriate decimal precision based on price
+     * For small prices (like 0.0100781), we need more precision
+     */
+    private function getPricePrecision(float $price): int
+    {
+        if ($price >= 1) {
+            return 2; // For prices >= 1, use 2 decimals
+        } elseif ($price >= 0.1) {
+            return 4; // For prices >= 0.1, use 4 decimals
+        } elseif ($price >= 0.01) {
+            return 6; // For prices >= 0.01, use 6 decimals
+        } else {
+            return 8; // For prices < 0.01, use 8 decimals
+        }
     }
 
     /**
@@ -1137,7 +1162,7 @@ class CryptoAnalysisService
             $signal = 'HOLD';
         }
 
-        // Calculate SL/TP
+        // Calculate SL/TP based on original price (no rounding for database)
         $stopLossMultiplier = $params['stop_loss_multiplier'] ?? 2.0;
         $takeProfitMultiplier = $params['take_profit_multiplier'] ?? 2.0;
 
@@ -1152,6 +1177,9 @@ class CryptoAnalysisService
             $takeProfit = $price;
         }
 
+        // Determine precision for display only (not for database)
+        $precision = $this->getPricePrecision($price);
+
         // Generate reason
         $reasons = [];
         $reasons[] = "Цена " . ($priceAboveCloud ? 'выше' : 'ниже') . " облака Ишимоку";
@@ -1163,22 +1191,24 @@ class CryptoAnalysisService
             $reasons[] = "RSI в зоне продажи ({$rsiSellMin}-{$rsiSellMax})";
         }
 
+        // Return exact values (no rounding) - database supports decimal(20, 10)
+        // Price, stop_loss, take_profit will be saved exactly as calculated
         return [
-            'price' => round($price, 2),
-            'rsi' => round($rsi, 2),
-            'tenkan' => round($tenkan, 2),
-            'kijun' => round($kijun, 2),
-            'senkou_a' => round($ichimoku['senkou_a'], 2),
-            'senkou_b' => round($ichimoku['senkou_b'], 2),
-            'cloud_top' => round($cloudTop, 2),
-            'cloud_bottom' => round($cloudBottom, 2),
+            'price' => $price, // Exact price from provider, no rounding
+            'rsi' => $rsi,
+            'tenkan' => $tenkan,
+            'kijun' => $kijun,
+            'senkou_a' => $ichimoku['senkou_a'],
+            'senkou_b' => $ichimoku['senkou_b'],
+            'cloud_top' => $cloudTop,
+            'cloud_bottom' => $cloudBottom,
             'price_above_cloud' => $priceAboveCloud,
-            'atr' => round($atr, 2),
+            'atr' => $atr,
             'signal' => $signal,
             'long_probability' => $longProb,
             'short_probability' => $shortProb,
-            'stop_loss' => round($stopLoss, 2),
-            'take_profit' => round($takeProfit, 2),
+            'stop_loss' => $stopLoss, // Exact value, no rounding
+            'take_profit' => $takeProfit, // Exact value, no rounding
             'reason' => implode('. ', $reasons),
             'strength' => abs($longProb - $shortProb) > 20 ? 'STRONG' : (abs($longProb - $shortProb) > 10 ? 'MEDIUM' : 'WEAK')
         ];

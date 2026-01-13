@@ -15,7 +15,7 @@ class LandingController extends Controller
         if (auth()->check()) {
             return redirect()->route('home');
         }
-        
+
         return view('landing');
     }
 }
