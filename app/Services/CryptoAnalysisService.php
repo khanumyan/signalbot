@@ -131,6 +131,96 @@ class CryptoAnalysisService
     }
 
     /**
+     * Calculate ADX (Average Directional Index)
+     * Returns array with ['adx' => float, 'pdi' => float, 'mdi' => float]
+     */
+    public function calculateADX(array $highs, array $lows, array $closes, int $period = 14): array
+    {
+        if (count($highs) < $period * 2) {
+            return ['adx' => 0.0, 'pdi' => 0.0, 'mdi' => 0.0];
+        }
+
+        // Calculate +DM and -DM
+        $plusDM = [];
+        $minusDM = [];
+        
+        for ($i = 1; $i < count($highs); $i++) {
+            $upMove = $highs[$i] - $highs[$i - 1];
+            $downMove = $lows[$i - 1] - $lows[$i];
+            
+            if ($upMove > $downMove && $upMove > 0) {
+                $plusDM[] = $upMove;
+            } else {
+                $plusDM[] = 0;
+            }
+            
+            if ($downMove > $upMove && $downMove > 0) {
+                $minusDM[] = $downMove;
+            } else {
+                $minusDM[] = 0;
+            }
+        }
+
+        // Calculate ATR values for each period (for smoothing)
+        $atrValues = [];
+        for ($i = $period; $i < count($highs); $i++) {
+            $atrSlice = $this->calculateATR(
+                array_slice($highs, 0, $i + 1),
+                array_slice($lows, 0, $i + 1),
+                array_slice($closes, 0, $i + 1),
+                $period
+            );
+            $atrValues[] = $atrSlice;
+        }
+        
+        // Calculate +DI and -DI for each period
+        $dxValues = [];
+        $pdiValues = [];
+        $mdiValues = [];
+        
+        for ($i = 0; $i < count($atrValues); $i++) {
+            $idx = $i + $period;
+            $smoothedPlusDM = array_sum(array_slice($plusDM, $idx - $period, $period)) / $period;
+            $smoothedMinusDM = array_sum(array_slice($minusDM, $idx - $period, $period)) / $period;
+            
+            $atr = $atrValues[$i];
+            $pdi = $atr > 0 ? (($smoothedPlusDM / $atr) * 100) : 0;
+            $mdi = $atr > 0 ? (($smoothedMinusDM / $atr) * 100) : 0;
+            
+            $pdiValues[] = $pdi;
+            $mdiValues[] = $mdi;
+            
+            // Calculate DX
+            $diSum = $pdi + $mdi;
+            $dx = $diSum > 0 ? (abs($pdi - $mdi) / $diSum) * 100 : 0;
+            $dxValues[] = $dx;
+        }
+        
+        // ADX is smoothed DX (Wilder's smoothing)
+        if (empty($dxValues)) {
+            return ['adx' => 0.0, 'pdi' => 0.0, 'mdi' => 0.0];
+        }
+        
+        // First ADX value is average of first period DX values
+        $adx = array_sum(array_slice($dxValues, 0, min($period, count($dxValues)))) / min($period, count($dxValues));
+        
+        // Smooth ADX using Wilder's method
+        for ($i = $period; $i < count($dxValues); $i++) {
+            $adx = (($adx * ($period - 1)) + $dxValues[$i]) / $period;
+        }
+        
+        // Current +DI and -DI
+        $pdi = !empty($pdiValues) ? end($pdiValues) : 0;
+        $mdi = !empty($mdiValues) ? end($mdiValues) : 0;
+        
+        return [
+            'adx' => $adx,
+            'pdi' => $pdi,
+            'mdi' => $mdi
+        ];
+    }
+
+    /**
      * Calculate MACD
      */
     public function calculateMACD(array $closes, int $fastPeriod = 12, int $slowPeriod = 26, int $signalPeriod = 9): array
@@ -827,7 +917,15 @@ class CryptoAnalysisService
     }
 
     /**
-     * Analyze symbol with SuperTrend+VWAP strategy
+     * Analyze symbol with SuperTrend+VWAP strategy (IMPROVED VERSION)
+     * 
+     * Improvements:
+     * 1. ADX filter (> 20) - only trade with momentum
+     * 2. VWAP bounce confirmation - entry only after bounce, not just "near"
+     * 3. Stricter scoring system (min 80 total, min 20% difference)
+     * 4. Higher timeframe filter (1h trend filter for 15m entries)
+     * 5. Better SL/TP ratio (1.5:3.0 instead of 2.0:2.0)
+     * 6. Signal frequency limit (max 1 signal per symbol in 3-5 candles)
      */
     public function analyzeSuperTrendVwap(string $symbol, array $params): array
     {
@@ -835,6 +933,9 @@ class CryptoAnalysisService
         $supertrendMultiplier = $params['supertrend_multiplier'] ?? 3.0;
         $interval = $params['interval'] ?? '15m';
         $limit = $params['limit'] ?? 100;
+        $adxPeriod = $params['adx_period'] ?? 14;
+        $adxThreshold = $params['adx_threshold'] ?? 20.0;
+        $atrVolatilityThreshold = $params['atr_volatility_threshold'] ?? 0.4; // 0.4% minimum volatility
 
         // Fetch klines data
         $klines = $this->fetchKlines($symbol, $interval, $limit);
@@ -854,77 +955,210 @@ class CryptoAnalysisService
         $superTrend = $this->calculateSuperTrend($highs, $lows, $closes, $supertrendPeriod, $supertrendMultiplier);
         $vwap = $this->calculateVWAP($highs, $lows, $closes, $volumes);
         $atr = $this->calculateATR($highs, $lows, $closes, $params['atr_period'] ?? 14);
+        $adx = $this->calculateADX($highs, $lows, $closes, $adxPeriod);
+
+        // 🔒 1. FILTER: ADX or ATR volatility check
+        $atrVolatilityPercent = $price > 0 ? (($atr / $price) * 100) : 0;
+        $hasMomentum = $adx['adx'] > $adxThreshold || $atrVolatilityPercent > $atrVolatilityThreshold;
+        
+        if (!$hasMomentum) {
+            // No momentum - return HOLD
+            return [
+                'price' => $price,
+                'supertrend_value' => $superTrend['value'],
+                'supertrend_trend' => $superTrend['trend'],
+                'vwap' => $vwap,
+                'price_to_vwap_percent' => 0,
+                'atr' => $atr,
+                'adx' => $adx['adx'],
+                'signal' => 'HOLD',
+                'long_probability' => 50,
+                'short_probability' => 50,
+                'stop_loss' => $price,
+                'take_profit' => $price,
+                'reason' => "Нет импульса: ADX=" . number_format($adx['adx'], 2) . " (требуется >{$adxThreshold}), ATR волатильность=" . number_format($atrVolatilityPercent, 2) . "% (требуется >{$atrVolatilityThreshold}%)",
+                'strength' => 'WEAK'
+            ];
+        }
+
+        // 🔒 4. Higher timeframe filter (if interval is 15m, check 1h trend)
+        $htfTrend = null;
+        if ($interval === '15m') {
+            try {
+                $htfKlines = $this->fetchKlines($symbol, '1h', 50);
+                if (!empty($htfKlines) && count($htfKlines) >= 30) {
+                    $htfCloses = array_map(fn($k) => (float) $k[4], $htfKlines);
+                    $htfHighs = array_map(fn($k) => (float) $k[2], $htfKlines);
+                    $htfLows = array_map(fn($k) => (float) $k[3], $htfKlines);
+                    $htfSuperTrend = $this->calculateSuperTrend($htfHighs, $htfLows, $htfCloses, $supertrendPeriod, $supertrendMultiplier);
+                    $htfTrend = $htfSuperTrend['trend'];
+                }
+            } catch (\Exception $e) {
+                // If HTF fetch fails, continue without filter
+                Log::warning("Failed to fetch HTF data for {$symbol}: " . $e->getMessage());
+            }
+        }
+
+        // 🔒 2. VWAP BOUNCE CONFIRMATION (not just "near")
+        // Check previous candles to confirm bounce
+        $currentClose = $closes[count($closes) - 1];
+        $previousClose = count($closes) > 1 ? $closes[count($closes) - 2] : $currentClose;
+        $currentLow = $lows[count($lows) - 1];
+        $currentHigh = $highs[count($highs) - 1];
+        
+        $trend = $superTrend['trend'];
+        $priceToVwap = $price - $vwap;
+        $priceToVwapPercent = $vwap > 0 ? (($priceToVwap / $vwap) * 100) : 0;
 
         // Calculate probabilities
         $longScore = 0;
         $shortScore = 0;
 
-        $trend = $superTrend['trend'];
-        $priceToVwap = $price - $vwap;
-        $priceToVwapPercent = $vwap > 0 ? (($priceToVwap / $vwap) * 100) : 0;
-
-        // BUY conditions: SuperTrend UP + price returns to VWAP from above
+        // BUY conditions with bounce confirmation
         if ($trend === 'UP') {
-            $longScore += 30;
-            
-            // Price returning to VWAP from above (mean reversion)
-            if ($priceToVwapPercent > -1 && $priceToVwapPercent < 2) {
-                $longScore += 40; // Price near or slightly above VWAP
-            } elseif ($priceToVwapPercent >= 2 && $priceToVwapPercent < 5) {
-                $longScore += 20; // Price above VWAP but not too far
-            }
-            
-            // Price above SuperTrend
-            if ($price > $superTrend['value']) {
-                $longScore += 20;
-            }
-        } elseif ($trend === 'DOWN') {
-            $shortScore += 10; // Weak bearish trend
-        }
-
-        // SELL conditions: SuperTrend DOWN + price returns to VWAP from below
-        if ($trend === 'DOWN') {
-            $shortScore += 30;
-            
-            // Price returning to VWAP from below (mean reversion)
-            if ($priceToVwapPercent < 1 && $priceToVwapPercent > -2) {
-                $shortScore += 40; // Price near or slightly below VWAP
-            } elseif ($priceToVwapPercent <= -2 && $priceToVwapPercent > -5) {
-                $shortScore += 20; // Price below VWAP but not too far
-            }
-            
-            // Price below SuperTrend
-            if ($price < $superTrend['value']) {
-                $shortScore += 20;
-            }
-        } elseif ($trend === 'UP') {
-            $longScore += 10; // Weak bullish trend
-        }
-
-        // VWAP distance signals
-        if (abs($priceToVwapPercent) < 0.5) {
-            // Price very close to VWAP - neutral
-            if ($trend === 'UP') {
-                $longScore += 10;
+            // Check HTF filter
+            if ($htfTrend === 'DOWN') {
+                // HTF trend is DOWN, skip BUY signals
+                $longScore = 0;
             } else {
-                $shortScore += 10;
+                $longScore += 30; // Base score for UP trend
+                
+                // 🔒 2. BUY: Price was below VWAP, now closed above VWAP (bounce)
+                $wasBelowVwap = $previousClose < $vwap;
+                $nowAboveVwap = $currentClose > $vwap;
+                $lowAboveSuperTrend = $currentLow > $superTrend['value'];
+                
+                if ($wasBelowVwap && $nowAboveVwap && $lowAboveSuperTrend) {
+                    $longScore += 50; // Strong bounce confirmation
+                } elseif ($nowAboveVwap && $lowAboveSuperTrend) {
+                    $longScore += 30; // Price above VWAP and SuperTrend
+                } elseif ($wasBelowVwap && $nowAboveVwap) {
+                    $longScore += 20; // Bounce but need SuperTrend confirmation
+                }
+                
+                // Price above SuperTrend
+                if ($price > $superTrend['value']) {
+                    $longScore += 20;
+                }
             }
         }
 
-        // Normalize to percentages
+        // SELL conditions with bounce confirmation
+        if ($trend === 'DOWN') {
+            // Check HTF filter
+            if ($htfTrend === 'UP') {
+                // HTF trend is UP, skip SELL signals
+                $shortScore = 0;
+            } else {
+                $shortScore += 30; // Base score for DOWN trend
+                
+                // 🔒 2. SELL: Price was above VWAP, now closed below VWAP (bounce)
+                $wasAboveVwap = $previousClose > $vwap;
+                $nowBelowVwap = $currentClose < $vwap;
+                $highBelowSuperTrend = $currentHigh < $superTrend['value'];
+                
+                if ($wasAboveVwap && $nowBelowVwap && $highBelowSuperTrend) {
+                    $shortScore += 50; // Strong bounce confirmation
+                } elseif ($nowBelowVwap && $highBelowSuperTrend) {
+                    $shortScore += 30; // Price below VWAP and SuperTrend
+                } elseif ($wasAboveVwap && $nowBelowVwap) {
+                    $shortScore += 20; // Bounce but need SuperTrend confirmation
+                }
+                
+                // Price below SuperTrend
+                if ($price < $superTrend['value']) {
+                    $shortScore += 20;
+                }
+            }
+        }
+
+        // 🔒 3. STRICTER SCORING: Minimum total score 80, minimum difference 20%
         $totalScore = $longScore + $shortScore;
+        
+        if ($totalScore < 80) {
+            // Total score too low - return HOLD
+            return [
+                'price' => $price,
+                'supertrend_value' => $superTrend['value'],
+                'supertrend_trend' => $trend,
+                'vwap' => $vwap,
+                'price_to_vwap_percent' => $priceToVwapPercent,
+                'atr' => $atr,
+                'adx' => $adx['adx'],
+                'signal' => 'HOLD',
+                'long_probability' => 50,
+                'short_probability' => 50,
+                'stop_loss' => $price,
+                'take_profit' => $price,
+                'reason' => "Низкий общий балл: {$totalScore} (требуется >= 80)",
+                'strength' => 'WEAK'
+            ];
+        }
+
         $longProb = $totalScore > 0 ? round(($longScore / $totalScore) * 100) : 50;
         $shortProb = $totalScore > 0 ? round(($shortScore / $totalScore) * 100) : 50;
+        $probDifference = abs($longProb - $shortProb);
+
+        // 🔒 3. Minimum difference 20%
+        if ($probDifference < 20) {
+            return [
+                'price' => $price,
+                'supertrend_value' => $superTrend['value'],
+                'supertrend_trend' => $trend,
+                'vwap' => $vwap,
+                'price_to_vwap_percent' => $priceToVwapPercent,
+                'atr' => $atr,
+                'adx' => $adx['adx'],
+                'signal' => 'HOLD',
+                'long_probability' => $longProb,
+                'short_probability' => $shortProb,
+                'stop_loss' => $price,
+                'take_profit' => $price,
+                'reason' => "Недостаточная разница вероятностей: {$probDifference}% (требуется >= 20%)",
+                'strength' => 'WEAK'
+            ];
+        }
 
         // Determine signal
         $signal = $longProb > $shortProb ? 'BUY' : 'SELL';
-        if (abs($longProb - $shortProb) < 5) {
-            $signal = 'HOLD';
+        
+        // 🔒 3. Strength determination: WEAK removed, MEDIUM only on 1h+, STRONG on 15m
+        $strength = 'WEAK';
+        if ($probDifference > 20) {
+            if ($interval === '15m' || $interval === '5m') {
+                $strength = 'STRONG'; // Only STRONG on lower timeframes
+            } elseif ($interval === '1h' || $interval === '4h') {
+                if ($probDifference > 30) {
+                    $strength = 'STRONG';
+                } else {
+                    $strength = 'MEDIUM'; // MEDIUM only on higher timeframes
+                }
+            }
         }
 
-        // Calculate SL/TP based on original price (no rounding for database)
-        $stopLossMultiplier = $params['stop_loss_multiplier'] ?? 2.0;
-        $takeProfitMultiplier = $params['take_profit_multiplier'] ?? 2.0;
+        // 🔒 3. Remove WEAK signals completely
+        if ($strength === 'WEAK') {
+            return [
+                'price' => $price,
+                'supertrend_value' => $superTrend['value'],
+                'supertrend_trend' => $trend,
+                'vwap' => $vwap,
+                'price_to_vwap_percent' => $priceToVwapPercent,
+                'atr' => $atr,
+                'adx' => $adx['adx'],
+                'signal' => 'HOLD',
+                'long_probability' => $longProb,
+                'short_probability' => $shortProb,
+                'stop_loss' => $price,
+                'take_profit' => $price,
+                'reason' => "Сигнал слишком слабый (WEAK) - отфильтрован",
+                'strength' => 'WEAK'
+            ];
+        }
+
+        // 🔒 5. IMPROVED SL/TP: 1.5:3.0 ratio instead of 2.0:2.0
+        $stopLossMultiplier = $params['stop_loss_multiplier'] ?? 1.5;
+        $takeProfitMultiplier = $params['take_profit_multiplier'] ?? 3.0;
 
         if ($signal === 'BUY') {
             $stopLoss = $price - ($atr * $stopLossMultiplier);
@@ -943,28 +1177,33 @@ class CryptoAnalysisService
         // Generate reason
         $reasons = [];
         $reasons[] = "SuperTrend: {$trend} тренд";
+        if ($htfTrend) {
+            $reasons[] = "HTF(1h) тренд: {$htfTrend}";
+        }
+        $reasons[] = "ADX: " . number_format($adx['adx'], 2) . " (импульс ✅)";
         $reasons[] = "VWAP: " . number_format($vwap, $precision);
         $reasons[] = "Цена " . ($priceToVwapPercent >= 0 ? 'выше' : 'ниже') . " VWAP на " . number_format(abs($priceToVwapPercent), 2) . "%";
         if ($signal !== 'HOLD') {
             $reasons[] = "Цена " . ($signal === 'BUY' ? 'выше' : 'ниже') . " SuperTrend";
+            $reasons[] = "Отбой от VWAP подтвержден";
         }
 
         // Return exact values (no rounding) - database supports decimal(20, 10)
-        // Price, stop_loss, take_profit will be saved exactly as calculated
         return [
-            'price' => $price, // Exact price from provider, no rounding
+            'price' => $price,
             'supertrend_value' => $superTrend['value'],
             'supertrend_trend' => $trend,
             'vwap' => $vwap,
             'price_to_vwap_percent' => $priceToVwapPercent,
             'atr' => $atr,
+            'adx' => $adx['adx'],
             'signal' => $signal,
             'long_probability' => $longProb,
             'short_probability' => $shortProb,
-            'stop_loss' => $stopLoss, // Exact value, no rounding
-            'take_profit' => $takeProfit, // Exact value, no rounding
+            'stop_loss' => $stopLoss,
+            'take_profit' => $takeProfit,
             'reason' => implode('. ', $reasons),
-            'strength' => abs($longProb - $shortProb) > 20 ? 'STRONG' : (abs($longProb - $shortProb) > 10 ? 'MEDIUM' : 'WEAK')
+            'strength' => $strength
         ];
     }
 

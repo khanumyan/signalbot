@@ -82,13 +82,35 @@ class SuperTrendVwapCommand extends Command
                 $this->info('📱 Sending signals to instant signal bot...');
                 foreach ($this->analysisSignals as $symbol => $signals) {
                     foreach ($signals as $signal) {
-                        // Отправляем только MEDIUM и STRONG сигналы
-                        if (in_array($signal['strength'], ['STRONG']) && CryptoSignal::shouldSendSignal($symbol, $signal['type'], $signal['strength'], 'SuperTrend+VWAP')) {
+                        // 🔒 6. Frequency limit: Check if signal was sent recently (last 3-5 candles)
+                        // For 15m interval, 3-5 candles = 45-75 minutes
+                        $intervalMinutes = match($interval) {
+                            '5m' => 5,
+                            '15m' => 15,
+                            '1h' => 60,
+                            '4h' => 240,
+                            default => 15
+                        };
+                        $maxMinutes = $intervalMinutes * 5; // 5 candles maximum
+                        
+                        $recentSignal = CryptoSignal::where('symbol', $symbol)
+                            ->where('strategy', 'SuperTrend+VWAP')
+                            ->where('signal_time', '>=', now()->addHours(4)->subMinutes($maxMinutes))
+                            ->orderBy('signal_time', 'desc')
+                            ->first();
+                        
+                        if ($recentSignal) {
+                            $this->info("⏭️ Skipping {$symbol}: сигнал уже был отправлен " . $recentSignal->signal_time->diffForHumans());
+                            continue;
+                        }
+                        
+                        // Отправляем только STRONG и MEDIUM сигналы (WEAK отфильтрованы в стратегии)
+                        if (in_array($signal['strength'], ['STRONG', 'MEDIUM']) && CryptoSignal::shouldSendSignal($symbol, $signal['type'], $signal['strength'], 'SuperTrend+VWAP')) {
                             $this->telegramService->sendInstantSignal($signal, $symbol, 'SuperTrend+VWAP');
                             $this->saveSignalToDatabase($signal, $symbol);
                             usleep(500000);
-                        } elseif ($signal['strength'] === 'WEAK') {
-                            $this->info("⏭️ Skipping WEAK signal for {$symbol}: {$signal['type']} ({$signal['strength']})");
+                        } else {
+                            $this->info("⏭️ Skipping {$symbol}: {$signal['type']} ({$signal['strength']}) - не прошел фильтры");
                         }
                     }
                 }
