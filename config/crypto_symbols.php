@@ -72,8 +72,8 @@ function getCryptoSymbolsFromBinance(): array
         sort($symbols);
         $symbols = array_values($symbols);
         
-        // Исключаем BTC и YFI из массива
-        $excludedSymbols = ['BTC', 'YFI'];
+        // Исключаем BTC, YFI и BTCDOM из массива
+        $excludedSymbols = ['BTC', 'YFI', 'BTCDOM'];
         $symbols = array_filter($symbols, function($symbol) use ($excludedSymbols) {
             return !in_array($symbol, $excludedSymbols);
         });
