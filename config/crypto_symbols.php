@@ -72,6 +72,13 @@ function getCryptoSymbolsFromBinance(): array
         sort($symbols);
         $symbols = array_values($symbols);
         
+        // Исключаем BTC и YFI из массива
+        $excludedSymbols = ['BTC', 'YFI'];
+        $symbols = array_filter($symbols, function($symbol) use ($excludedSymbols) {
+            return !in_array($symbol, $excludedSymbols);
+        });
+        $symbols = array_values($symbols); // Переиндексируем массив
+        
         // Сохраняем в кеш
         $cacheDir = dirname($cacheFile);
         if (!is_dir($cacheDir)) {
