@@ -152,7 +152,7 @@
 <body>
     <div class="auth-container">
         <div class="logo-container">
-            <img src="{{ asset('images/Traiding (1).svg') }}" alt="Traiding Helper Pro Logo" class="logo-image" onerror="this.style.display='none';">
+            <img src="{{ asset('images/Traiding (10).png') }}" alt="Traiding Helper Pro Logo" class="logo-image" onerror="this.style.display='none';">
         </div>
 
         <div class="auth-card">

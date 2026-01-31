@@ -291,7 +291,7 @@
             <div>
                 <div style="display: flex; align-items: center; gap: 12px;">
                     <a href="{{ route('signals.index') }}" class="back-button">← Назад к списку</a>
-                    <img src="{{ asset('images/Traiding (1).svg') }}" alt="Logo" style="width: 40px; height: 40px; object-fit: contain;">
+                    <img src="{{ asset('images/Traiding (10).png') }}" alt="Logo" style="width: 40px; height: 40px; object-fit: contain;">
                     <div>
                         <div class="header-title">📊 Детали сигнала</div>
                         <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">{{ $signal->symbol }} - {{ $signal->signal_time->format('d.m.Y H:i') }}</div>

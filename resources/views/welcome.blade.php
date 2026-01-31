@@ -333,7 +333,7 @@
             </button>
         </form>
         <div class="logo-container">
-            <img src="{{ asset('images/Traiding (1).svg') }}" alt="Traiding Helper Pro Logo" class="logo-image" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+            <img src="{{ asset('images/Traiding (10).png') }}" alt="Traiding Helper Pro Logo" class="logo-image" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
             <div style="display: none; align-items: center; justify-content: center; gap: 12px;">
                 <span style="font-size: 48px;">🤖</span>
             </div>
