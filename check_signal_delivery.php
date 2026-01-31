@@ -89,3 +89,5 @@ if ($activeUsers->count() > 0) {
     echo "4. У пользователей нет telegram_chat_id\n";
 }
 
+
+

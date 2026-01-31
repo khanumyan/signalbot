@@ -6,6 +6,7 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use App\Services\TelegramService;
+use App\Services\CryptoAnalysisService;
 use App\Models\CryptoSignal;
 
 class CryptoAnalysisCommand extends Command
@@ -32,11 +33,13 @@ class CryptoAnalysisCommand extends Command
     protected array $analysisSignals = [];
     protected array $analysisErrors = [];
     protected TelegramService $telegramService;
+    protected CryptoAnalysisService $analysisService;
 
-    public function __construct(TelegramService $telegramService)
+    public function __construct(TelegramService $telegramService, CryptoAnalysisService $analysisService)
     {
         parent::__construct();
         $this->telegramService = $telegramService;
+        $this->analysisService = $analysisService;
     }
 
     public function handle(): int
@@ -177,19 +180,37 @@ class CryptoAnalysisCommand extends Command
                 $this->analysisSignals[$symbol] = $signals;
 
                 foreach ($signals as $signal) {
-                    // Проверяем, нужно ли отправить мгновенный сигнал (только MEDIUM и STRONG)
-                    if (in_array($signal['strength'], ['STRONG']) && CryptoSignal::shouldSendSignal($symbol, $signal['type'], $signal['strength'], 'MTF')) {
-                        // Отправляем мгновенный сигнал в дополнительный бот
-                        $this->telegramService->sendInstantSignal($signal, $symbol, 'MTF');
-
-                        // Сохраняем сигнал в базу данных
-                        $this->saveSignalToDatabase($signal, $symbol);
-                    } else {
-                        if ($signal['strength'] === 'WEAK') {
-                            $this->info("⏭️ Skipping WEAK signal for {$symbol}: {$signal['type']} ({$signal['strength']}) - MTF strategy");
-                        } else {
-                            $this->info("⏭️ Skipping duplicate instant signal for {$symbol}: {$signal['type']} ({$signal['strength']}) - MTF strategy");
+                    // 🔥 Отправляем только STRONG и MEDIUM (WEAK уже отфильтрованы выше)
+                    if (in_array($signal['strength'], ['STRONG', 'MEDIUM'])) {
+                        // 🔒 Глобальный фильтр: проверка рыночного контекста
+                        $marketContext = $this->analysisService->checkMarketContext($symbol, $signal['type']);
+                        
+                        if (!$marketContext['allowed']) {
+                            $this->info("⏭️ Skipping {$symbol}: {$signal['type']} - " . $marketContext['reason']);
+                            continue;
                         }
+                        
+                        // Улучшенная проверка с учетом RSI и HTF тренда
+                        $shouldSend = CryptoSignal::shouldSendSignal(
+                            $symbol, 
+                            $signal['type'], 
+                            $signal['strength'], 
+                            'MTF',
+                            $signal['rsi'],
+                            $signal['htf_trend']
+                        );
+                        
+                        if ($shouldSend) {
+                            // Отправляем мгновенный сигнал в дополнительный бот
+                            $this->telegramService->sendInstantSignal($signal, $symbol, 'MTF');
+
+                            // Сохраняем сигнал в базу данных
+                            $this->saveSignalToDatabase($signal, $symbol);
+                        } else {
+                            $this->info("⏭️ Skipping duplicate signal for {$symbol}: {$signal['type']} ({$signal['strength']}) - MTF strategy");
+                        }
+                    } else {
+                        $this->info("⏭️ Skipping WEAK signal for {$symbol}: {$signal['type']} ({$signal['strength']}) - MTF strategy");
                     }
                     usleep(200000); // 0.2 секунды задержка между сигналами
                 }
@@ -377,40 +398,22 @@ class CryptoAnalysisCommand extends Command
         // 1. HTF фильтр тренда
         $htfTrend = $this->getHTFTrend($ema1h, $rsi1h, $price1h);
 
-        // 2. Основной сигнал на 15m
-        $baseSignal = $this->getBaseSignal15m($rsi15m, $price15m, $bb15m);
+        // 2. Основной сигнал на 15m (теперь с обязательным HTF RSI)
+        $baseSignal = $this->getBaseSignal15m($rsi15m, $rsi1h, $price15m, $bb15m);
 
-        // 3. Проверяем совместимость с HTF трендом
+        // 3. Проверяем совместимость с HTF трендом (ужесточенные требования)
         $htfAllowed = $this->isSignalAllowedByHTF($baseSignal, $htfTrend);
 
         // 4. Проверяем подтверждение на 5m
         $ltfConfirmed = $baseSignal ? $this->isSignalConfirmedByLTF($baseSignal, $rsi5m, $price5m, $ema5m) : false;
 
-        // 5. Новая логика: разрешаем слабые сигналы даже без полного MTF подтверждения
+        // 5. 🔥 НОВАЯ УЖЕСТОЧЕННАЯ ЛОГИКА: WEAK полностью исключены
+        
         $canSendSignal = false;
         $signalStrength = 'WEAK';
 
-        // Экстремальные RSI (≤20 или ≥80) - отправляем как WEAK, но учитываем HTF тренд
-        if (($baseSignal === 'BUY' && $rsi15m <= 20) || ($baseSignal === 'SELL' && $rsi15m >= 80)) {
-            // Проверяем совместимость с HTF трендом даже для экстремальных RSI
-            if ($this->isSignalAllowedByHTF($baseSignal, $htfTrend)) {
-                $canSendSignal = true;
-                $signalStrength = 'WEAK';
-            }
-        }
-
-        // Полное MTF подтверждение - может быть MEDIUM или STRONG
-        if ($htfAllowed && $ltfConfirmed) {
-            $canSendSignal = true;
-            $signalStrength = 'MEDIUM'; // Будет пересчитано в calculateMTFStrength
-        }
-
-        if (!$canSendSignal) {
-            return $signals; // Не отправляем сигнал
-        }
-
-        // 6. Рассчитываем финальную силу сигнала с учетом новой логики
-        $finalStrength = $this->calculateMTFStrength(
+        // Рассчитываем предварительную силу для проверки HTF
+        $preliminaryStrength = $this->calculateMTFStrength(
             $baseSignal,
             $htfTrend,
             $indicators15m,
@@ -419,6 +422,45 @@ class CryptoAnalysisCommand extends Command
             $htfAllowed,
             $ltfConfirmed
         );
+
+        // WEAK сигналы полностью исключены
+        if ($preliminaryStrength === 'WEAK') {
+            return $signals; // Не отправляем WEAK
+        }
+
+        // Проверяем HTF с учетом силы сигнала
+        $htfAllowedForStrength = $this->isSignalAllowedByHTF($baseSignal, $htfTrend, $preliminaryStrength);
+
+        // STRONG: требуется полное MTF подтверждение + строгий HTF
+        if ($preliminaryStrength === 'STRONG') {
+            // Сценарий A: Максимальный приоритет - полное MTF + все TF совпадают
+            if ($htfAllowedForStrength && $ltfConfirmed) {
+                $canSendSignal = true;
+                $signalStrength = 'STRONG';
+            }
+            // Сценарий B: Без LTF, но с усилением (RSI ≤10/≥90 + ADX ≥25)
+            elseif ($htfAllowedForStrength && (($rsi15m <= 10 && $baseSignal === 'BUY') || ($rsi15m >= 90 && $baseSignal === 'SELL'))) {
+                // Проверяем ADX (будет добавлено в calculateMTFStrength)
+                $canSendSignal = true;
+                $signalStrength = 'STRONG';
+            }
+        }
+
+        // MEDIUM: только при идеальном контексте
+        if ($preliminaryStrength === 'MEDIUM') {
+            // MEDIUM допускается только если: RSI ≤20/≥80 + полное MTF + строгий HTF (не NEUTRAL)
+            if ($htfAllowedForStrength && $ltfConfirmed && $htfTrend !== 'NEUTRAL') {
+                $canSendSignal = true;
+                $signalStrength = 'MEDIUM';
+            }
+        }
+
+        if (!$canSendSignal) {
+            return $signals; // Не отправляем сигнал
+        }
+
+        // 6. Рассчитываем финальную силу сигнала
+        $finalStrength = $signalStrength;
 
         // 6. Рассчитываем SL/TP по 15m
         $slTp = $this->calculateStopLossTakeProfit(
@@ -471,33 +513,53 @@ class CryptoAnalysisCommand extends Command
         return 'NEUTRAL';
     }
 
-    private function getBaseSignal15m(float $rsi15m, float $price15m, array $bb15m): ?string
+    private function getBaseSignal15m(float $rsi15m, float $rsi1h, float $price15m, array $bb15m): ?string
     {
-        // BUY сигнал на 15m - расширенные условия
-        if ($rsi15m <= 30) {
+        // 🔥 НОВЫЕ БАЗОВЫЕ УСЛОВИЯ: Обязательный HTF RSI фильтр
+        
+        // BUY сигнал на 15m: RSI ≤ 30 И HTF RSI ≤ 40
+        if ($rsi15m <= 30 && $rsi1h <= 40) {
             return 'BUY';
         }
 
-        // SELL сигнал на 15m - расширенные условия
-        if ($rsi15m >= 70) {
+        // SELL сигнал на 15m: RSI ≥ 70 И HTF RSI ≥ 60
+        if ($rsi15m >= 70 && $rsi1h >= 60) {
             return 'SELL';
         }
 
         return null; // Нет сигнала
     }
 
-    private function isSignalAllowedByHTF(?string $baseSignal, string $htfTrend): bool
+    private function isSignalAllowedByHTF(?string $baseSignal, string $htfTrend, string $strength = 'STRONG'): bool
     {
         if (!$baseSignal) return false;
 
-        // BUY разрешен только в бычьем или нейтральном тренде
-        if ($baseSignal === 'BUY' && ($htfTrend === 'BULLISH' || $htfTrend === 'NEUTRAL')) {
-            return true;
+        // 🔥 УЖЕСТОЧЕННЫЕ ТРЕБОВАНИЯ К HTF ТРЕНДУ
+        
+        // STRONG: Только строгое совпадение направления
+        if ($strength === 'STRONG') {
+            // BUY STRONG разрешен ТОЛЬКО в бычьем тренде
+            if ($baseSignal === 'BUY' && $htfTrend === 'BULLISH') {
+                return true;
+            }
+            // SELL STRONG разрешен ТОЛЬКО в медвежьем тренде
+            if ($baseSignal === 'SELL' && $htfTrend === 'BEARISH') {
+                return true;
+            }
+            return false;
         }
 
-        // SELL разрешен только в медвежьем или нейтральном тренде
-        if ($baseSignal === 'SELL' && ($htfTrend === 'BEARISH' || $htfTrend === 'NEUTRAL')) {
-            return true;
+        // MEDIUM: BULLISH/BEARISH (NEUTRAL исключен)
+        if ($strength === 'MEDIUM') {
+            // BUY MEDIUM разрешен только в бычьем тренде
+            if ($baseSignal === 'BUY' && $htfTrend === 'BULLISH') {
+                return true;
+            }
+            // SELL MEDIUM разрешен только в медвежьем тренде
+            if ($baseSignal === 'SELL' && $htfTrend === 'BEARISH') {
+                return true;
+            }
+            return false;
         }
 
         return false;
@@ -530,29 +592,23 @@ class CryptoAnalysisCommand extends Command
         $rsi15m = $indicators15m['rsi'];
         $rsi5m = $indicators5m['rsi'];
 
-        // Новая логика силы сигнала
-
-        // STRONG: Экстремальные RSI + полное MTF подтверждение
-        if (($rsi15m <= 15 || $rsi15m >= 85) && $htfAllowed && $ltfConfirmed) {
+        // 🔥 УЖЕСТОЧЕННАЯ ЛОГИКА СИЛЫ СИГНАЛА
+        
+        // STRONG: Повышенные лимиты RSI
+        // BUY STRONG: RSI ≤ 12
+        // SELL STRONG: RSI ≥ 88
+        if (($rsi15m <= 12 && $baseSignal === 'BUY') || ($rsi15m >= 88 && $baseSignal === 'SELL')) {
             return 'STRONG';
         }
 
-        // STRONG: Экстремальные RSI + HTF подтверждение
-        if (($rsi15m <= 15 || $rsi15m >= 85) && $htfAllowed) {
-            return 'STRONG';
-        }
-
-        // MEDIUM: Умеренные RSI + полное MTF подтверждение
-        if (($rsi15m <= 25 || $rsi15m >= 75) && $htfAllowed && $ltfConfirmed) {
+        // MEDIUM: Ограниченные условия
+        // BUY MEDIUM: RSI ≤ 20
+        // SELL MEDIUM: RSI ≥ 80
+        if (($rsi15m <= 20 && $baseSignal === 'BUY') || ($rsi15m >= 80 && $baseSignal === 'SELL')) {
             return 'MEDIUM';
         }
 
-        // MEDIUM: Экстремальные RSI без MTF подтверждения
-        if ($rsi15m <= 20 || $rsi15m >= 80) {
-            return 'MEDIUM';
-        }
-
-        // WEAK: Все остальные случаи
+        // WEAK: Все остальные случаи (полностью исключены из отправки)
         return 'WEAK';
     }
 
@@ -686,9 +742,9 @@ class CryptoAnalysisCommand extends Command
     private function calculateBuySLTP(string $strength, float $entryPrice, float $atr, array $bb): array
     {
         $multipliers = match ($strength) {
-            'STRONG' => ['sl' => 2.0, 'tp' => 3.0],
-            'MEDIUM' => ['sl' => 1.5, 'tp' => 2.0],
-            default => ['sl' => 1.0, 'tp' => 1.0]
+            'STRONG' => ['sl' => 2.3, 'tp' => 3.0],
+            'MEDIUM' => ['sl' => 1.8, 'tp' => 2.0],
+            default => ['sl' => 1.3, 'tp' => 1.0]
         };
 
         $sl = min($entryPrice - ($multipliers['sl'] * $atr), $bb['lower']);
@@ -703,9 +759,9 @@ class CryptoAnalysisCommand extends Command
     private function calculateSellSLTP(string $strength, float $entryPrice, float $atr, array $bb): array
     {
         $multipliers = match ($strength) {
-            'STRONG' => ['sl' => 2.0, 'tp' => 3.0],
-            'MEDIUM' => ['sl' => 1.5, 'tp' => 2.0],
-            default => ['sl' => 1.0, 'tp' => 1.0]
+            'STRONG' => ['sl' => 2.3, 'tp' => 3.0],
+            'MEDIUM' => ['sl' => 1.8, 'tp' => 2.0],
+            default => ['sl' => 1.3, 'tp' => 1.0]
         };
 
         $sl = max($entryPrice + ($multipliers['sl'] * $atr), $bb['upper']);

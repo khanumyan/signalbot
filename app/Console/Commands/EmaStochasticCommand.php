@@ -80,7 +80,7 @@ class EmaStochasticCommand extends Command
                 $this->info('📱 Sending signals to instant signal bot...');
                 foreach ($this->analysisSignals as $symbol => $signals) {
                     foreach ($signals as $signal) {
-                        // Отправляем только MEDIUM и STRONG сигналы
+                        // 🔥 Отправляем только MEDIUM и STRONG сигналы (для скальпинга)
                         if (in_array($signal['strength'], ['MEDIUM', 'STRONG']) && CryptoSignal::shouldSendSignal($symbol, $signal['type'], $signal['strength'], 'EMA+Stochastic')) {
                             $this->telegramService->sendInstantSignal($signal, $symbol, 'EMA+Stochastic');
                             $this->saveSignalToDatabase($signal, $symbol);
@@ -188,9 +188,9 @@ class EmaStochasticCommand extends Command
     {
         // Для скальпинга более узкие SL/TP
         $multiplier = match($strength) {
-            'STRONG' => ['sl' => 1.2, 'tp' => 2.4], // RR 1:2
-            'MEDIUM' => ['sl' => 1.2, 'tp' => 1.8], // RR 1:1.5
-            default => ['sl' => 1.2, 'tp' => 1.2]   // RR 1:1
+            'STRONG' => ['sl' => 1.5, 'tp' => 2.4], // RR 1:2
+            'MEDIUM' => ['sl' => 1.5, 'tp' => 1.8], // RR 1:1.5
+            default => ['sl' => 1.5, 'tp' => 1.2]   // RR 1:1
         };
 
         if ($type === 'BUY') {

@@ -104,7 +104,7 @@ class SuperTrendVwapCommand extends Command
                             continue;
                         }
                         
-                        // Отправляем только STRONG и MEDIUM сигналы (WEAK отфильтрованы в стратегии)
+                        // 🔥 Отправляем только STRONG и MEDIUM сигналы (WEAK отфильтрованы в стратегии)
                         if (in_array($signal['strength'], ['STRONG', 'MEDIUM']) && CryptoSignal::shouldSendSignal($symbol, $signal['type'], $signal['strength'], 'SuperTrend+VWAP')) {
                             $this->telegramService->sendInstantSignal($signal, $symbol, 'SuperTrend+VWAP');
                             $this->saveSignalToDatabase($signal, $symbol);
@@ -136,7 +136,7 @@ class SuperTrendVwapCommand extends Command
             'supertrend_period' => 10,
             'supertrend_multiplier' => 3.0,
             'atr_period' => 14,
-            'stop_loss_multiplier' => 2.0,
+            'stop_loss_multiplier' => 1.8,
             'take_profit_multiplier' => 2.0,
         ];
 

@@ -6,6 +6,7 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use App\Services\TelegramService;
+use App\Services\CryptoAnalysisService;
 use App\Models\CryptoSignal;
 
 class BollingerRsiCommand extends Command
@@ -22,11 +23,13 @@ class BollingerRsiCommand extends Command
     protected array $analysisSignals = [];
     protected array $analysisErrors = [];
     protected TelegramService $telegramService;
+    protected CryptoAnalysisService $analysisService;
 
-    public function __construct(TelegramService $telegramService)
+    public function __construct(TelegramService $telegramService, CryptoAnalysisService $analysisService)
     {
         parent::__construct();
         $this->telegramService = $telegramService;
+        $this->analysisService = $analysisService;
     }
 
     public function handle(): int
@@ -80,10 +83,20 @@ class BollingerRsiCommand extends Command
                 $this->info('📱 Sending signals to instant signal bot...');
                 foreach ($this->analysisSignals as $symbol => $signals) {
                     foreach ($signals as $signal) {
-                        // Отправляем только MEDIUM и STRONG сигналы
-                        if (in_array($signal['strength'], ['STRONG']) && CryptoSignal::shouldSendSignal($symbol, $signal['type'], $signal['strength'], 'Bollinger+RSI')) {
-                            $this->telegramService->sendInstantSignal($signal, $symbol, 'Bollinger+RSI');
-                            $this->saveSignalToDatabase($signal, $symbol);
+                        // 🔥 Отправляем только STRONG сигналы
+                        if (in_array($signal['strength'], ['STRONG'])) {
+                            // 🔒 Глобальный фильтр: проверка рыночного контекста
+                            $marketContext = $this->analysisService->checkMarketContext($symbol, $signal['type']);
+                            
+                            if (!$marketContext['allowed']) {
+                                $this->info("⏭️ Skipping {$symbol}: {$signal['type']} - " . $marketContext['reason']);
+                                continue;
+                            }
+                            
+                            if (CryptoSignal::shouldSendSignal($symbol, $signal['type'], $signal['strength'], 'Bollinger+RSI', $signal['rsi'])) {
+                                $this->telegramService->sendInstantSignal($signal, $symbol, 'Bollinger+RSI');
+                                $this->saveSignalToDatabase($signal, $symbol);
+                            }
                             usleep(500000);
                         }
                         elseif ($signal['strength'] === 'WEAK') {
@@ -135,23 +148,25 @@ class BollingerRsiCommand extends Command
         $signalType = null;
         $strength = 'WEAK';
 
-        // BUY: Price touches lower band + RSI < 30
+        // 🔥 УЖЕСТОЧЕННЫЕ КРИТЕРИИ: BUY - Price touches lower band + RSI < 30
         if ($price <= $bb['lower'] * 1.005 && $rsi < 30) {
             $signalType = 'BUY';
 
-            if ($rsi <= 20) {
+            // 🔥 Новые лимиты: STRONG ≤12, MEDIUM ≤20
+            if ($rsi <= 12) {
                 $strength = 'STRONG';
-            } elseif ($rsi <= 25) {
+            } elseif ($rsi <= 20) {
                 $strength = 'MEDIUM';
             }
         }
-        // SELL: Price touches upper band + RSI > 70
+        // 🔥 УЖЕСТОЧЕННЫЕ КРИТЕРИИ: SELL - Price touches upper band + RSI > 70
         elseif ($price >= $bb['upper'] * 0.995 && $rsi > 70) {
             $signalType = 'SELL';
 
-            if ($rsi >= 80) {
+            // 🔥 Новые лимиты: STRONG ≥88, MEDIUM ≥80
+            if ($rsi >= 88) {
                 $strength = 'STRONG';
-            } elseif ($rsi >= 75) {
+            } elseif ($rsi >= 80) {
                 $strength = 'MEDIUM';
             }
         }
@@ -185,8 +200,8 @@ class BollingerRsiCommand extends Command
     private function calculateSLTP(string $type, float $price, array $bb, float $atr, string $strength): array
     {
         if ($type === 'BUY') {
-            // SL: Немного за нижней полосой или 2xATR (повышено для защиты от ложных пробоев)
-            $sl = min($price - ($atr * 2.0), $bb['lower'] * 0.98);
+            // SL: Немного за нижней полосой или 2.3xATR (повышено для защиты от ложных пробоев)
+            $sl = min($price - ($atr * 2.3), $bb['lower'] * 0.98);
 
             // TP: Средняя линия BB или RR 1:1.5
             $risk = $price - $sl;
@@ -201,8 +216,8 @@ class BollingerRsiCommand extends Command
                 'take_profit' => $tp
             ];
         } else {
-            // SL: Немного за верхней полосой или 2xATR (повышено для защиты от ложных пробоев)
-            $sl = max($price + ($atr * 2.0), $bb['upper'] * 1.02);
+            // SL: Немного за верхней полосой или 2.3xATR (повышено для защиты от ложных пробоев)
+            $sl = max($price + ($atr * 2.3), $bb['upper'] * 1.02);
 
             // TP: Средняя линия BB или RR 1:1.5
             $risk = $sl - $price;

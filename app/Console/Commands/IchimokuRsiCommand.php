@@ -82,8 +82,8 @@ class IchimokuRsiCommand extends Command
                 $this->info('📱 Sending signals to instant signal bot...');
                 foreach ($this->analysisSignals as $symbol => $signals) {
                     foreach ($signals as $signal) {
-                        // Отправляем только MEDIUM и STRONG сигналы
-                        if (in_array($signal['strength'], ['STRONG']) && CryptoSignal::shouldSendSignal($symbol, $signal['type'], $signal['strength'], 'Ichimoku+RSI')) {
+                        // 🔥 Отправляем только STRONG сигналы
+                        if (in_array($signal['strength'], ['STRONG']) && CryptoSignal::shouldSendSignal($symbol, $signal['type'], $signal['strength'], 'Ichimoku+RSI', $signal['rsi'])) {
                             $this->telegramService->sendInstantSignal($signal, $symbol, 'Ichimoku+RSI');
                             $this->saveSignalToDatabase($signal, $symbol);
                             usleep(500000);
@@ -120,7 +120,7 @@ class IchimokuRsiCommand extends Command
             'kijun_period' => 26,
             'senkou_b_period' => 52,
             'atr_period' => 14,
-            'stop_loss_multiplier' => 2.0,
+            'stop_loss_multiplier' => 2.3,
             'take_profit_multiplier' => 2.0,
         ];
 

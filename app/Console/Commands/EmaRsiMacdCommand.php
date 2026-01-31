@@ -6,6 +6,7 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use App\Services\TelegramService;
+use App\Services\CryptoAnalysisService;
 use App\Models\CryptoSignal;
 
 class EmaRsiMacdCommand extends Command
@@ -22,11 +23,13 @@ class EmaRsiMacdCommand extends Command
     protected array $analysisSignals = [];
     protected array $analysisErrors = [];
     protected TelegramService $telegramService;
+    protected CryptoAnalysisService $analysisService;
 
-    public function __construct(TelegramService $telegramService)
+    public function __construct(TelegramService $telegramService, CryptoAnalysisService $analysisService)
     {
         parent::__construct();
         $this->telegramService = $telegramService;
+        $this->analysisService = $analysisService;
     }
 
     public function handle(): int
@@ -80,10 +83,20 @@ class EmaRsiMacdCommand extends Command
                 $this->info('📱 Sending signals to instant signal bot...');
                 foreach ($this->analysisSignals as $symbol => $signals) {
                     foreach ($signals as $signal) {
-                        // Отправляем только MEDIUM и STRONG сигналы
-                        if (in_array($signal['strength'], ['STRONG']) && CryptoSignal::shouldSendSignal($symbol, $signal['type'], $signal['strength'], 'EMA+RSI+MACD')) {
-                            $this->telegramService->sendInstantSignal($signal, $symbol, 'EMA+RSI+MACD');
-                            $this->saveSignalToDatabase($signal, $symbol);
+                        // 🔥 Отправляем только STRONG сигналы (MEDIUM исключены для этой стратегии)
+                        if (in_array($signal['strength'], ['STRONG'])) {
+                            // 🔒 Глобальный фильтр: проверка рыночного контекста
+                            $marketContext = $this->analysisService->checkMarketContext($symbol, $signal['type']);
+                            
+                            if (!$marketContext['allowed']) {
+                                $this->info("⏭️ Skipping {$symbol}: {$signal['type']} - " . $marketContext['reason']);
+                                continue;
+                            }
+                            
+                            if (CryptoSignal::shouldSendSignal($symbol, $signal['type'], $signal['strength'], 'EMA+RSI+MACD', $signal['rsi'])) {
+                                $this->telegramService->sendInstantSignal($signal, $symbol, 'EMA+RSI+MACD');
+                                $this->saveSignalToDatabase($signal, $symbol);
+                            }
                             usleep(500000);
                         } elseif ($signal['strength'] === 'WEAK') {
                             $this->info("⏭️ Skipping WEAK signal for {$symbol}: {$signal['type']} ({$signal['strength']})");
@@ -139,24 +152,25 @@ class EmaRsiMacdCommand extends Command
         $signalType = null;
         $strength = 'WEAK';
 
-        // BUY: Price crosses above EMA20, EMA20 > EMA50, MACD crosses above 0
+        // 🔥 УЖЕСТОЧЕННЫЕ КРИТЕРИИ: BUY - Price crosses above EMA20, EMA20 > EMA50, MACD crosses above 0
         if ($price > $ema20 && $ema20 > $ema50 && $macdLine > 0 && $macdHist > 0 && $rsi < 70) {
             $signalType = 'BUY';
 
-            // Strength based on RSI and MACD momentum
-            if ($rsi >= 40 && $rsi <= 60 && abs($macdHist) > 0.5) {
+            // 🔥 Новые лимиты RSI: STRONG ≤12, MEDIUM ≤20
+            if ($rsi <= 12 && abs($macdHist) > 0.5) {
                 $strength = 'STRONG';
-            } elseif ($rsi > 30 && abs($macdHist) > 0.2) {
+            } elseif ($rsi <= 20 && abs($macdHist) > 0.3) {
                 $strength = 'MEDIUM';
             }
         }
-        // SELL: Price crosses below EMA20, EMA20 < EMA50, MACD crosses below 0
+        // 🔥 УЖЕСТОЧЕННЫЕ КРИТЕРИИ: SELL - Price crosses below EMA20, EMA20 < EMA50, MACD crosses below 0
         elseif ($price < $ema20 && $ema20 < $ema50 && $macdLine < 0 && $macdHist < 0 && $rsi > 30) {
             $signalType = 'SELL';
 
-            if ($rsi >= 40 && $rsi <= 60 && abs($macdHist) > 0.5) {
+            // 🔥 Новые лимиты RSI: STRONG ≥88, MEDIUM ≥80
+            if ($rsi >= 88 && abs($macdHist) > 0.5) {
                 $strength = 'STRONG';
-            } elseif ($rsi < 70 && abs($macdHist) > 0.2) {
+            } elseif ($rsi >= 80 && abs($macdHist) > 0.3) {
                 $strength = 'MEDIUM';
             }
         }
@@ -190,9 +204,9 @@ class EmaRsiMacdCommand extends Command
     private function calculateSLTP(string $type, float $price, float $atr, string $strength): array
     {
         $multiplier = match($strength) {
-            'STRONG' => ['sl' => 2.0, 'tp' => 4.5], // RR 1:2.25
-            'MEDIUM' => ['sl' => 2.0, 'tp' => 3.0], // RR 1:1.5
-            default => ['sl' => 2.0, 'tp' => 2.25]  // RR 1:1.125
+            'STRONG' => ['sl' => 2.3, 'tp' => 4.5], // RR 1:2.25
+            'MEDIUM' => ['sl' => 2.3, 'tp' => 3.0], // RR 1:1.5
+            default => ['sl' => 2.3, 'tp' => 2.25]  // RR 1:1.125
         };
 
         if ($type === 'BUY') {

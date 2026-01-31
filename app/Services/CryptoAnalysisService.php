@@ -33,6 +33,56 @@ class CryptoAnalysisService
     }
 
     /**
+     * 🔒 Глобальный фильтр: Проверка рыночного контекста (BTC волатильность)
+     * Возвращает true если можно отправлять сигналы, false если нужно приостановить
+     */
+    public function checkMarketContext(string $symbol, string $signalType, float $btcVolatilityThreshold = 3.0): array
+    {
+        try {
+            // Получаем данные BTC за последние 2 свечи (15m)
+            $btcKlines = $this->fetchKlines('BTC', '15m', 2);
+            
+            if (empty($btcKlines) || count($btcKlines) < 2) {
+                // Если не удалось получить данные BTC, разрешаем сигналы (не блокируем)
+                return ['allowed' => true, 'reason' => 'BTC data unavailable'];
+            }
+
+            $currentBtcPrice = (float) $btcKlines[count($btcKlines) - 1][4];
+            $previousBtcPrice = (float) $btcKlines[count($btcKlines) - 2][4];
+            
+            // Рассчитываем волатильность BTC за 15m в процентах
+            $btcVolatility = abs((($currentBtcPrice - $previousBtcPrice) / $previousBtcPrice) * 100);
+
+            // Если BTC волатильность слишком высокая - приостанавливаем сигналы
+            if ($btcVolatility > $btcVolatilityThreshold) {
+                return [
+                    'allowed' => false,
+                    'reason' => "BTC волатильность слишком высокая: " . number_format($btcVolatility, 2) . "% (лимит: {$btcVolatilityThreshold}%)"
+                ];
+            }
+
+            // Дополнительная проверка: если BTC резко падает, блокируем SELL сигналы для альтов
+            if ($symbol !== 'BTC' && $signalType === 'SELL') {
+                $btcChange = (($currentBtcPrice - $previousBtcPrice) / $previousBtcPrice) * 100;
+                
+                // Если BTC падает более чем на 1% за 15m, блокируем SELL для альтов
+                if ($btcChange < -1.0) {
+                    return [
+                        'allowed' => false,
+                        'reason' => "BTC падает: " . number_format($btcChange, 2) . "% - SELL сигналы для альтов заблокированы"
+                    ];
+                }
+            }
+
+            return ['allowed' => true, 'reason' => 'Market context OK', 'btc_volatility' => $btcVolatility];
+        } catch (\Exception $e) {
+            // При ошибке разрешаем сигналы (не блокируем)
+            Log::warning("Market context check failed: " . $e->getMessage());
+            return ['allowed' => true, 'reason' => 'Market context check failed: ' . $e->getMessage()];
+        }
+    }
+
+    /**
      * Calculate RSI
      */
     public function calculateRSI(array $closes, int $period = 14): float
@@ -468,7 +518,7 @@ class CryptoAnalysisService
         }
 
         // Calculate SL/TP
-        $stopLossMultiplier = $params['stop_loss_multiplier'] ?? 2.0;
+        $stopLossMultiplier = $params['stop_loss_multiplier'] ?? 2.3;
         $takeProfitMultiplier = $params['take_profit_multiplier'] ?? 2.0;
 
         if ($signal === 'BUY') {
@@ -775,7 +825,7 @@ class CryptoAnalysisService
         }
 
         // Calculate SL/TP (scalping strategy - tighter stops)
-        $stopLossMultiplier = $params['stop_loss_multiplier'] ?? 1.2;
+        $stopLossMultiplier = $params['stop_loss_multiplier'] ?? 1.5;
         $takeProfitMultiplier = $params['take_profit_multiplier'] ?? 1.8;
 
         // Determine strength for multiplier adjustment
@@ -934,8 +984,8 @@ class CryptoAnalysisService
         $interval = $params['interval'] ?? '15m';
         $limit = $params['limit'] ?? 100;
         $adxPeriod = $params['adx_period'] ?? 14;
-        $adxThreshold = $params['adx_threshold'] ?? 20.0;
-        $atrVolatilityThreshold = $params['atr_volatility_threshold'] ?? 0.4; // 0.4% minimum volatility
+        $adxThreshold = $params['adx_threshold'] ?? 25.0; // 🔥 Повышен до 25
+        $atrVolatilityThreshold = $params['atr_volatility_threshold'] ?? 0.6; // 🔥 Повышен до 0.6%
 
         // Fetch klines data
         $klines = $this->fetchKlines($symbol, $interval, $limit);
@@ -957,9 +1007,9 @@ class CryptoAnalysisService
         $atr = $this->calculateATR($highs, $lows, $closes, $params['atr_period'] ?? 14);
         $adx = $this->calculateADX($highs, $lows, $closes, $adxPeriod);
 
-        // 🔒 1. FILTER: ADX or ATR volatility check
+        // 🔒 1. УЖЕСТОЧЕННЫЙ FILTER: ADX ≥ 25 И ATR ≥ 0.6%
         $atrVolatilityPercent = $price > 0 ? (($atr / $price) * 100) : 0;
-        $hasMomentum = $adx['adx'] > $adxThreshold || $atrVolatilityPercent > $atrVolatilityThreshold;
+        $hasMomentum = $adx['adx'] >= $adxThreshold && $atrVolatilityPercent >= $atrVolatilityThreshold;
         
         if (!$hasMomentum) {
             // No momentum - return HOLD
@@ -976,11 +1026,11 @@ class CryptoAnalysisService
                 'short_probability' => 50,
                 'stop_loss' => $price,
                 'take_profit' => $price,
-                'reason' => "Нет импульса: ADX=" . number_format($adx['adx'], 2) . " (требуется >{$adxThreshold}), ATR волатильность=" . number_format($atrVolatilityPercent, 2) . "% (требуется >{$atrVolatilityThreshold}%)",
+                'reason' => "Нет импульса: ADX=" . number_format($adx['adx'], 2) . " (требуется ≥{$adxThreshold}), ATR волатильность=" . number_format($atrVolatilityPercent, 2) . "% (требуется ≥{$atrVolatilityThreshold}%)",
                 'strength' => 'WEAK'
             ];
         }
-
+        
         // 🔒 4. Higher timeframe filter (if interval is 15m, check 1h trend)
         $htfTrend = null;
         if ($interval === '15m') {
@@ -999,6 +1049,11 @@ class CryptoAnalysisService
             }
         }
 
+        // 🔥 Дополнительный RSI фильтр для SuperTrend+VWAP
+        $rsi = $this->calculateRSI($closes, 14);
+        $rsiBuyThreshold = 25;  // BUY: RSI ≤ 25
+        $rsiSellThreshold = 75; // SELL: RSI ≥ 75
+        
         // 🔒 2. VWAP BOUNCE CONFIRMATION (not just "near")
         // Check previous candles to confirm bounce
         $currentClose = $closes[count($closes) - 1];
@@ -1009,6 +1064,33 @@ class CryptoAnalysisService
         $trend = $superTrend['trend'];
         $priceToVwap = $price - $vwap;
         $priceToVwapPercent = $vwap > 0 ? (($priceToVwap / $vwap) * 100) : 0;
+        
+        // Проверяем RSI перед продолжением
+        $rsiPassed = false;
+        if ($trend === 'UP' && $rsi <= $rsiBuyThreshold) {
+            $rsiPassed = true;
+        } elseif ($trend === 'DOWN' && $rsi >= $rsiSellThreshold) {
+            $rsiPassed = true;
+        }
+        
+        if (!$rsiPassed) {
+            return [
+                'price' => $price,
+                'supertrend_value' => $superTrend['value'],
+                'supertrend_trend' => $trend,
+                'vwap' => $vwap,
+                'price_to_vwap_percent' => 0,
+                'atr' => $atr,
+                'adx' => $adx['adx'],
+                'signal' => 'HOLD',
+                'long_probability' => 50,
+                'short_probability' => 50,
+                'stop_loss' => $price,
+                'take_profit' => $price,
+                'reason' => "RSI не в экстремальной зоне: {$rsi} (BUY требуется ≤{$rsiBuyThreshold}, SELL требуется ≥{$rsiSellThreshold})",
+                'strength' => 'WEAK'
+            ];
+        }
 
         // Calculate probabilities
         $longScore = 0;
@@ -1072,10 +1154,10 @@ class CryptoAnalysisService
             }
         }
 
-        // 🔒 3. STRICTER SCORING: Minimum total score 80, minimum difference 20%
+        // 🔒 3. УЖЕСТОЧЕННОЕ SCORING: Minimum total score 85, minimum difference 25%
         $totalScore = $longScore + $shortScore;
         
-        if ($totalScore < 80) {
+        if ($totalScore < 85) {
             // Total score too low - return HOLD
             return [
                 'price' => $price,
@@ -1090,7 +1172,7 @@ class CryptoAnalysisService
                 'short_probability' => 50,
                 'stop_loss' => $price,
                 'take_profit' => $price,
-                'reason' => "Низкий общий балл: {$totalScore} (требуется >= 80)",
+                'reason' => "Низкий общий балл: {$totalScore} (требуется >= 85)",
                 'strength' => 'WEAK'
             ];
         }
@@ -1099,8 +1181,8 @@ class CryptoAnalysisService
         $shortProb = $totalScore > 0 ? round(($shortScore / $totalScore) * 100) : 50;
         $probDifference = abs($longProb - $shortProb);
 
-        // 🔒 3. Minimum difference 20%
-        if ($probDifference < 20) {
+        // 🔒 3. Minimum difference 25%
+        if ($probDifference < 25) {
             return [
                 'price' => $price,
                 'supertrend_value' => $superTrend['value'],
@@ -1114,7 +1196,7 @@ class CryptoAnalysisService
                 'short_probability' => $shortProb,
                 'stop_loss' => $price,
                 'take_profit' => $price,
-                'reason' => "Недостаточная разница вероятностей: {$probDifference}% (требуется >= 20%)",
+                'reason' => "Недостаточная разница вероятностей: {$probDifference}% (требуется >= 25%)",
                 'strength' => 'WEAK'
             ];
         }
@@ -1156,8 +1238,8 @@ class CryptoAnalysisService
             ];
         }
 
-        // 🔒 5. IMPROVED SL/TP: 1.5:3.0 ratio instead of 2.0:2.0
-        $stopLossMultiplier = $params['stop_loss_multiplier'] ?? 1.5;
+        // 🔒 5. IMPROVED SL/TP: 1.8:3.0 ratio instead of 2.0:2.0
+        $stopLossMultiplier = $params['stop_loss_multiplier'] ?? 1.8;
         $takeProfitMultiplier = $params['take_profit_multiplier'] ?? 3.0;
 
         if ($signal === 'BUY') {
@@ -1402,7 +1484,7 @@ class CryptoAnalysisService
         }
 
         // Calculate SL/TP based on original price (no rounding for database)
-        $stopLossMultiplier = $params['stop_loss_multiplier'] ?? 2.0;
+        $stopLossMultiplier = $params['stop_loss_multiplier'] ?? 2.3;
         $takeProfitMultiplier = $params['take_profit_multiplier'] ?? 2.0;
 
         if ($signal === 'BUY') {

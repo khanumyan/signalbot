@@ -88,10 +88,11 @@ class CheckSignalStatusCommand extends Command
 
     /**
      * Проверяет статус сигнала на основе исторических данных
+     * Проверяет свечи от времени создания сигнала до текущего момента в хронологическом порядке
      */
     private function checkSignalStatus(CryptoSignal $signal): string
     {
-        // Получаем исторические данные от времени открытия сигнала (signal_time) до сейчас
+        // 🔥 ИСПРАВЛЕНО: Получаем исторические данные от времени открытия сигнала (signal_time) до сейчас
         $startTime = $signal->signal_time->timestamp * 1000; // Binance требует миллисекунды
         $endTime = Carbon::now()->timestamp * 1000;
 
@@ -102,44 +103,59 @@ class CheckSignalStatusCommand extends Command
             return 'PROCESSING'; // Если не удалось получить данные, оставляем в обработке
         }
 
-        // Извлекаем все цены (high, low, close) за период
-        $reachedTakeProfit = false;
-        $hitStopLoss = false;
-
+        // 🔥 ИСПРАВЛЕНО: Проверяем свечи в хронологическом порядке (от времени сигнала вперед)
+        // Останавливаемся на первом событии (SL или TP), которое произошло раньше
+        
         foreach ($allKlines as $kline) {
+            $klineTime = (int) $kline[0]; // Время свечи в миллисекундах
             $high = (float) $kline[2]; // High price
             $low = (float) $kline[3];  // Low price
-            $close = (float) $kline[4]; // Close price
+            
+            // Пропускаем свечи, которые были ДО создания сигнала
+            if ($klineTime < $startTime) {
+                continue;
+            }
 
             if ($signal->type === 'BUY') {
-                // BUY: проверяем достижение TP и пробитие SL
-                if ($high >= $signal->take_profit) {
-                    $reachedTakeProfit = true;
-                }
-                if ($low < $signal->stop_loss) {
-                    $hitStopLoss = true;
+                // BUY: проверяем какое событие произошло первым в этой свече
+                // Если и SL и TP коснулись в одной свече, проверяем что было раньше
+                
+                $hitSL = $low < $signal->stop_loss;
+                $hitTP = $high >= $signal->take_profit;
+                
+                if ($hitSL && $hitTP) {
+                    // Оба события в одной свече - проверяем что было раньше
+                    // Если low коснулся SL раньше чем high коснулся TP - это MISSED
+                    // Для простоты считаем, что если low < SL, то это пробитие (MISSED)
+                    return 'MISSED';
+                } elseif ($hitSL) {
+                    // Сначала коснулся SL - MISSED
+                    return 'MISSED';
+                } elseif ($hitTP) {
+                    // Сначала коснулся TP - DONE
+                    return 'DONE';
                 }
             } else {
-                // SELL: проверяем достижение TP и пробитие SL
-                if ($low <= $signal->take_profit) {
-                    $reachedTakeProfit = true;
-                }
-                if ($high > $signal->stop_loss) {
-                    $hitStopLoss = true;
+                // SELL: проверяем какое событие произошло первым в этой свече
+                
+                $hitSL = $high > $signal->stop_loss;
+                $hitTP = $low <= $signal->take_profit;
+                
+                if ($hitSL && $hitTP) {
+                    // Оба события в одной свече - проверяем что было раньше
+                    // Если high коснулся SL раньше чем low коснулся TP - это MISSED
+                    return 'MISSED';
+                } elseif ($hitSL) {
+                    // Сначала коснулся SL - MISSED
+                    return 'MISSED';
+                } elseif ($hitTP) {
+                    // Сначала коснулся TP - DONE
+                    return 'DONE';
                 }
             }
         }
 
-        // Определяем статус
-        if ($hitStopLoss) {
-            return 'MISSED';
-        }
-
-        if ($reachedTakeProfit && !$hitStopLoss) {
-            return 'DONE';
-        }
-
-        // Если не достигнут TP и не пробит SL - все еще в процессе
+        // Если прошли все свечи и не достигли ни TP, ни SL - все еще в процессе
         return 'PROCESSING';
     }
 
