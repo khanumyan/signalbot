@@ -401,11 +401,16 @@ class CryptoAnalysisCommand extends Command
         // 2. Основной сигнал на 15m (теперь с обязательным HTF RSI)
         $baseSignal = $this->getBaseSignal15m($rsi15m, $rsi1h, $price15m, $bb15m);
 
+        // Если нет базового сигнала, возвращаем пустой массив
+        if (!$baseSignal) {
+            return $signals;
+        }
+
         // 3. Проверяем совместимость с HTF трендом (ужесточенные требования)
         $htfAllowed = $this->isSignalAllowedByHTF($baseSignal, $htfTrend);
 
         // 4. Проверяем подтверждение на 5m
-        $ltfConfirmed = $baseSignal ? $this->isSignalConfirmedByLTF($baseSignal, $rsi5m, $price5m, $ema5m) : false;
+        $ltfConfirmed = $this->isSignalConfirmedByLTF($baseSignal, $rsi5m, $price5m, $ema5m);
 
         // 5. 🔥 НОВАЯ УЖЕСТОЧЕННАЯ ЛОГИКА: WEAK полностью исключены
         
