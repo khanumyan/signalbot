@@ -9,19 +9,20 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote')->hourly();
 
 /*
-|--------------------------------------------------------------------------
-| Available Trading Strategy Commands
-|--------------------------------------------------------------------------
-|
-| 1. crypto:analyze           - Original MTF (Multi-TimeFrame) strategy
-| 2. crypto:ema-rsi-macd      - 🧠 EMA + RSI + MACD (universal trend-following)
-| 3. crypto:bollinger-rsi     - 💥 Bollinger Bands + RSI (counter-trend bounces)
-| 4. crypto:ema-stochastic    - ⚡ EMA(9/21) + Stochastic (impulse scalping)
-|| 5. crypto:supertrend-vwap   - 📊 SuperTrend + VWAP (intraday trending) [ВРЕМЕННО ОТКЛЮЧЕНО]
-| 6. crypto:ichimoku-rsi      - 🔥 Ichimoku + RSI (trend with cloud support)
-|
-| All commands support options: --symbol, --interval, --telegram, --telegram-only
-|
+||--------------------------------------------------------------------------
+|| Available Trading Strategy Commands
+||--------------------------------------------------------------------------
+||
+|| 1. crypto:analyze           - Original MTF (Multi-TimeFrame) strategy
+|| 2. crypto:ema-rsi-macd      - 🧠 EMA + RSI + MACD (universal trend-following)
+|| 3. crypto:bollinger-rsi     - 💥 Bollinger Bands + RSI (counter-trend bounces)
+|| 4. crypto:ema-stochastic    - ⚡ EMA(9/21) + Stochastic (impulse scalping)
+||| 5. crypto:supertrend-vwap   - 📊 SuperTrend + VWAP (intraday trending) [ВРЕМЕННО ОТКЛЮЧЕНО]
+|| 6. crypto:ichimoku-rsi      - 🔥 Ichimoku + RSI (trend with cloud support)
+|| 7. crypto:smart-money-concepts - 💎 Smart Money Concepts (SMC with Order Blocks, BOS/CHOCH, FVG)
+||
+|| All commands support options: --symbol, --interval, --telegram, --telegram-only
+||
 */
 
 // Основное расписание - каждые 12 минут (MTF strategy)
@@ -66,6 +67,13 @@ Schedule::command('crypto:ema-stochastic --telegram-only --interval=5m')
 //    ->withoutOverlapping()
 //    ->runInBackground()
 //    ->appendOutputTo(storage_path('logs/crypto_analysis.log'));
+
+// Smart Money Concepts strategy - каждые 25 минут
+Schedule::command('crypto:smart-money-concepts --telegram-only --interval=15m')
+    ->cron('*/25 * * * *')
+    ->withoutOverlapping()
+    ->runInBackground()
+    ->appendOutputTo(storage_path('logs/crypto_analysis.log'));
 
 // Crypto News (Russian) - каждые 30 минут
 Schedule::command('crypto:fetch-news')

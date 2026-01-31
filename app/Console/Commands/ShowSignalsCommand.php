@@ -49,6 +49,7 @@ class ShowSignalsCommand extends Command
                 'EMA+Stochastic' => '⚡',
                 'SuperTrend+VWAP' => '📊',
                 'Ichimoku+RSI' => '🔥',
+                'Smart Money Concepts' => '💎',
                 default => '🔄'
             };
 

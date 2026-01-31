@@ -61,6 +61,7 @@ class StrategySettingsController extends Controller
             'EMA+Stochastic' => 'EMA + Stochastic Strategy',
             'SuperTrend+VWAP' => 'SuperTrend + VWAP Strategy',
             'Ichimoku+RSI' => 'Ichimoku + RSI Strategy',
+            'Smart Money Concepts' => 'Smart Money Concepts Strategy',
         ];
 
         $settings = [];
@@ -178,6 +179,7 @@ class StrategySettingsController extends Controller
                 'EMA+Stochastic' => $analysisService->analyzeEmaStochastic($symbol, $finalParams),
                 'SuperTrend+VWAP' => $analysisService->analyzeSuperTrendVwap($symbol, $finalParams),
                 'Ichimoku+RSI' => $analysisService->analyzeIchimokuRsi($symbol, $finalParams),
+                'Smart Money Concepts' => $analysisService->analyzeSmartMoneyConcepts($symbol, $finalParams),
                 default => throw new \Exception("Стратегия {$strategy} пока не поддерживается для анализа")
             };
 

@@ -93,6 +93,14 @@ class UserStrategySetting extends Model
                 'stop_loss_multiplier' => 2.0,
                 'take_profit_multiplier' => 2.0,
             ],
+            'Smart Money Concepts' => [
+                'rsi_period' => 14,
+                'htf_interval' => '1h',
+                'order_block_lookback' => 20,
+                'atr_period' => 14,
+                'stop_loss_multiplier' => 2.3,
+                'take_profit_multiplier' => 3.0,
+            ],
         ];
 
         return $defaults[$strategyName] ?? [];

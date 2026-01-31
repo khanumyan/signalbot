@@ -1534,6 +1534,370 @@ class CryptoAnalysisService
             'strength' => abs($longProb - $shortProb) > 20 ? 'STRONG' : (abs($longProb - $shortProb) > 10 ? 'MEDIUM' : 'WEAK')
         ];
     }
+
+    /**
+     * Analyze symbol with Smart Money Concepts (SMC) strategy
+     * Based on Order Blocks, Market Structure (BOS/CHOCH), Fair Value Gaps
+     */
+    public function analyzeSmartMoneyConcepts(string $symbol, array $params): array
+    {
+        $interval = $params['interval'] ?? '15m';
+        $limit = $params['limit'] ?? 200;
+        $htfInterval = $params['htf_interval'] ?? '1h'; // Higher timeframe for trend
+        $rsiPeriod = $params['rsi_period'] ?? 14;
+        $orderBlockLookback = $params['order_block_lookback'] ?? 20; // Свечей для поиска Order Blocks
+
+        // Fetch klines data
+        $klines = $this->fetchKlines($symbol, $interval, $limit);
+        $htfKlines = $this->fetchKlines($symbol, $htfInterval, 100);
+
+        if (empty($klines) || count($klines) < 50) {
+            throw new \Exception("Недостаточно данных для анализа");
+        }
+
+        // Extract price data
+        $closes = array_map(fn($k) => (float) $k[4], $klines);
+        $highs = array_map(fn($k) => (float) $k[2], $klines);
+        $lows = array_map(fn($k) => (float) $k[3], $klines);
+        $volumes = array_map(fn($k) => (float) $k[5], $klines);
+
+        // HTF data
+        $htfCloses = array_map(fn($k) => (float) $k[4], $htfKlines);
+        $htfHighs = array_map(fn($k) => (float) $k[2], $htfKlines);
+        $htfLows = array_map(fn($k) => (float) $k[3], $htfKlines);
+
+        // Calculate indicators
+        $price = end($closes);
+        $rsi = $this->calculateRSI($closes, $rsiPeriod);
+        $htfRsi = $this->calculateRSI($htfCloses, $rsiPeriod);
+        $ema = $this->calculateEMA($closes, 50);
+        $htfEma = $this->calculateEMA($htfCloses, 50);
+        $atr = $this->calculateATR($highs, $lows, $closes, 14);
+
+        // 🔥 Определяем HTF тренд (Smart Money Concepts требует торговлю по тренду)
+        $htfTrend = 'NEUTRAL';
+        if ($price > $htfEma && $htfRsi > 50) {
+            $htfTrend = 'BULLISH';
+        } elseif ($price < $htfEma && $htfRsi < 50) {
+            $htfTrend = 'BEARISH';
+        }
+
+        // 🔥 Находим Order Blocks (последние сильные свечи перед разворотом)
+        $orderBlocks = $this->findOrderBlocks($highs, $lows, $closes, $volumes, $orderBlockLookback);
+        
+        // 🔥 Определяем Market Structure (BOS/CHOCH)
+        $marketStructure = $this->detectMarketStructure($highs, $lows, $closes);
+
+        // 🔥 Находим Fair Value Gaps (FVG)
+        $fvg = $this->findFairValueGaps($highs, $lows, $closes);
+
+        // Calculate probabilities
+        $longScore = 0;
+        $shortScore = 0;
+
+        // BUY conditions: Бычий тренд + возврат к Bullish Order Block
+        if ($htfTrend === 'BULLISH') {
+            $longScore += 30; // Базовый балл за тренд
+            
+            // Проверяем возврат к Bullish Order Block
+            foreach ($orderBlocks['bullish'] as $ob) {
+                if ($price >= $ob['low'] && $price <= $ob['high']) {
+                    $longScore += 40; // Цена в зоне Bullish OB
+                    break;
+                } elseif ($price > $ob['low'] * 0.98 && $price < $ob['low'] * 1.02) {
+                    $longScore += 25; // Близко к Bullish OB
+                }
+            }
+
+            // Проверяем Fair Value Gap для входа
+            foreach ($fvg['bullish'] as $gap) {
+                if ($price >= $gap['bottom'] && $price <= $gap['top']) {
+                    $longScore += 30; // Цена в Bullish FVG
+                    break;
+                }
+            }
+
+            // Market Structure подтверждение
+            if ($marketStructure === 'BULLISH_BOS' || $marketStructure === 'BULLISH_CHOCH') {
+                $longScore += 20;
+            }
+
+            // RSI фильтр
+            if ($rsi <= 40 && $rsi >= 20) {
+                $longScore += 15; // RSI в зоне для входа
+            }
+        }
+
+        // SELL conditions: Медвежий тренд + возврат к Bearish Order Block
+        if ($htfTrend === 'BEARISH') {
+            $shortScore += 30; // Базовый балл за тренд
+            
+            // Проверяем возврат к Bearish Order Block
+            foreach ($orderBlocks['bearish'] as $ob) {
+                if ($price >= $ob['low'] && $price <= $ob['high']) {
+                    $shortScore += 40; // Цена в зоне Bearish OB
+                    break;
+                } elseif ($price > $ob['high'] * 0.98 && $price < $ob['high'] * 1.02) {
+                    $shortScore += 25; // Близко к Bearish OB
+                }
+            }
+
+            // Проверяем Fair Value Gap для входа
+            foreach ($fvg['bearish'] as $gap) {
+                if ($price >= $gap['bottom'] && $price <= $gap['top']) {
+                    $shortScore += 30; // Цена в Bearish FVG
+                    break;
+                }
+            }
+
+            // Market Structure подтверждение
+            if ($marketStructure === 'BEARISH_BOS' || $marketStructure === 'BEARISH_CHOCH') {
+                $shortScore += 20;
+            }
+
+            // RSI фильтр
+            if ($rsi >= 60 && $rsi <= 80) {
+                $shortScore += 15; // RSI в зоне для входа
+            }
+        }
+
+        // Normalize to percentages
+        $totalScore = max(1, $longScore + $shortScore);
+        $longProb = round(($longScore / $totalScore) * 100);
+        $shortProb = round(($shortScore / $totalScore) * 100);
+
+        // Determine signal
+        $signal = $longProb > $shortProb ? 'BUY' : 'SELL';
+        if (abs($longProb - $shortProb) < 15) {
+            $signal = 'HOLD';
+        }
+
+        // 🔥 УЖЕСТОЧЕННЫЕ КРИТЕРИИ: Только STRONG и MEDIUM
+        $strength = 'WEAK';
+        if ($signal !== 'HOLD') {
+            if (abs($longProb - $shortProb) >= 25) {
+                $strength = 'STRONG';
+            } elseif (abs($longProb - $shortProb) >= 20) {
+                $strength = 'MEDIUM';
+            }
+        }
+
+        // Если WEAK - возвращаем HOLD
+        if ($strength === 'WEAK') {
+            return [
+                'price' => $price,
+                'rsi' => $rsi,
+                'ema' => $ema,
+                'atr' => $atr,
+                'signal' => 'HOLD',
+                'long_probability' => $longProb,
+                'short_probability' => $shortProb,
+                'stop_loss' => $price,
+                'take_profit' => $price,
+                'reason' => 'Сигнал слишком слабый (WEAK) - отфильтрован',
+                'strength' => 'WEAK',
+                'htf_trend' => $htfTrend,
+                'htf_rsi' => $htfRsi,
+                'market_structure' => $marketStructure
+            ];
+        }
+
+        // Calculate SL/TP (на основе ATR и Order Blocks)
+        $stopLossMultiplier = $params['stop_loss_multiplier'] ?? 2.3;
+        $takeProfitMultiplier = $params['take_profit_multiplier'] ?? 3.0;
+
+        $orderBlockHigh = null;
+        $orderBlockLow = null;
+
+        if ($signal === 'BUY' && !empty($orderBlocks['bullish'])) {
+            $ob = $orderBlocks['bullish'][0];
+            $orderBlockHigh = $ob['high'];
+            $orderBlockLow = $ob['low'];
+            $stopLoss = min($price - ($atr * $stopLossMultiplier), $orderBlockLow * 0.98);
+            $takeProfit = $price + ($atr * $takeProfitMultiplier);
+        } elseif ($signal === 'SELL' && !empty($orderBlocks['bearish'])) {
+            $ob = $orderBlocks['bearish'][0];
+            $orderBlockHigh = $ob['high'];
+            $orderBlockLow = $ob['low'];
+            $stopLoss = max($price + ($atr * $stopLossMultiplier), $orderBlockHigh * 1.02);
+            $takeProfit = $price - ($atr * $takeProfitMultiplier);
+        } else {
+            // Fallback если нет Order Blocks
+            if ($signal === 'BUY') {
+                $stopLoss = $price - ($atr * $stopLossMultiplier);
+                $takeProfit = $price + ($atr * $takeProfitMultiplier);
+            } else {
+                $stopLoss = $price + ($atr * $stopLossMultiplier);
+                $takeProfit = $price - ($atr * $takeProfitMultiplier);
+            }
+        }
+
+        // Generate reason
+        $reasons = [];
+        $reasons[] = "HTF тренд: {$htfTrend}";
+        if ($marketStructure) {
+            $reasons[] = "Market Structure: {$marketStructure}";
+        }
+        if ($orderBlockHigh && $orderBlockLow) {
+            $reasons[] = "Order Block: " . number_format($orderBlockLow, 2) . " - " . number_format($orderBlockHigh, 2);
+        }
+        $reasons[] = "RSI: {$rsi}";
+
+        return [
+            'price' => $price,
+            'rsi' => $rsi,
+            'ema' => $ema,
+            'atr' => $atr,
+            'signal' => $signal,
+            'long_probability' => $longProb,
+            'short_probability' => $shortProb,
+            'stop_loss' => $stopLoss,
+            'take_profit' => $takeProfit,
+            'reason' => implode('. ', $reasons),
+            'strength' => $strength,
+            'htf_trend' => $htfTrend,
+            'htf_rsi' => $htfRsi,
+            'order_block_high' => $orderBlockHigh,
+            'order_block_low' => $orderBlockLow,
+            'market_structure' => $marketStructure,
+            'volume_ratio' => 1.0
+        ];
+    }
+
+    /**
+     * Находит Order Blocks (последние сильные свечи перед разворотом)
+     */
+    private function findOrderBlocks(array $highs, array $lows, array $closes, array $volumes, int $lookback): array
+    {
+        $bullishOB = [];
+        $bearishOB = [];
+        $count = count($closes);
+
+        if ($count < $lookback + 5) {
+            return ['bullish' => [], 'bearish' => []];
+        }
+
+        // Ищем последние сильные движения перед разворотом
+        for ($i = $count - $lookback; $i < $count - 1; $i++) {
+            $currentHigh = $highs[$i];
+            $currentLow = $lows[$i];
+            $currentClose = $closes[$i];
+            $currentVolume = $volumes[$i];
+            $avgVolume = array_sum(array_slice($volumes, max(0, $i - 20), 20)) / 20;
+
+            // Bullish Order Block: сильная бычья свеча перед разворотом вниз
+            if ($currentClose > ($currentHigh + $currentLow) / 2 && $currentVolume > $avgVolume * 1.5) {
+                // Проверяем, был ли разворот после
+                if ($i + 1 < $count && $closes[$i + 1] < $currentClose) {
+                    $bullishOB[] = [
+                        'high' => $currentHigh,
+                        'low' => $currentLow,
+                        'index' => $i
+                    ];
+                }
+            }
+
+            // Bearish Order Block: сильная медвежья свеча перед разворотом вверх
+            if ($currentClose < ($currentHigh + $currentLow) / 2 && $currentVolume > $avgVolume * 1.5) {
+                // Проверяем, был ли разворот после
+                if ($i + 1 < $count && $closes[$i + 1] > $currentClose) {
+                    $bearishOB[] = [
+                        'high' => $currentHigh,
+                        'low' => $currentLow,
+                        'index' => $i
+                    ];
+                }
+            }
+        }
+
+        // Берем только последние 3 Order Blocks
+        return [
+            'bullish' => array_slice($bullishOB, -3),
+            'bearish' => array_slice($bearishOB, -3)
+        ];
+    }
+
+    /**
+     * Определяет Market Structure (BOS/CHOCH)
+     */
+    private function detectMarketStructure(array $highs, array $lows, array $closes): ?string
+    {
+        $count = count($closes);
+        if ($count < 20) {
+            return null;
+        }
+
+        // Находим последние максимумы и минимумы
+        $recentHighs = array_slice($highs, -20);
+        $recentLows = array_slice($lows, -20);
+        $recentCloses = array_slice($closes, -20);
+
+        $highestHigh = max($recentHighs);
+        $lowestLow = min($recentLows);
+        $highestIndex = array_search($highestHigh, $recentHighs);
+        $lowestIndex = array_search($lowestLow, $recentLows);
+
+        $currentPrice = end($closes);
+        $previousPrice = $closes[$count - 2];
+
+        // BOS (Break Of Structure) - пробой предыдущего максимума/минимума
+        if ($currentPrice > $highestHigh && $previousPrice <= $highestHigh) {
+            return 'BULLISH_BOS';
+        }
+        if ($currentPrice < $lowestLow && $previousPrice >= $lowestLow) {
+            return 'BEARISH_BOS';
+        }
+
+        // CHOCH (Change Of Character) - изменение характера движения
+        $trend = $currentPrice > $previousPrice ? 'BULLISH' : 'BEARISH';
+        $prevTrend = $count > 2 ? ($closes[$count - 2] > $closes[$count - 3] ? 'BULLISH' : 'BEARISH') : null;
+
+        if ($prevTrend && $trend !== $prevTrend) {
+            return $trend === 'BULLISH' ? 'BULLISH_CHOCH' : 'BEARISH_CHOCH';
+        }
+
+        return null;
+    }
+
+    /**
+     * Находит Fair Value Gaps (FVG) - ценовые пробелы
+     */
+    private function findFairValueGaps(array $highs, array $lows, array $closes): array
+    {
+        $bullishFVG = [];
+        $bearishFVG = [];
+        $count = count($closes);
+
+        if ($count < 3) {
+            return ['bullish' => [], 'bearish' => []];
+        }
+
+        // Ищем FVG в последних 20 свечах
+        for ($i = max(0, $count - 20); $i < $count - 2; $i++) {
+            // Bullish FVG: gap вверх (low текущей свечи > high свечи 2 периода назад)
+            if ($lows[$i] > $highs[$i + 2]) {
+                $bullishFVG[] = [
+                    'top' => $lows[$i],
+                    'bottom' => $highs[$i + 2],
+                    'index' => $i
+                ];
+            }
+
+            // Bearish FVG: gap вниз (high текущей свечи < low свечи 2 периода назад)
+            if ($highs[$i] < $lows[$i + 2]) {
+                $bearishFVG[] = [
+                    'top' => $lows[$i + 2],
+                    'bottom' => $highs[$i],
+                    'index' => $i
+                ];
+            }
+        }
+
+        return [
+            'bullish' => array_slice($bullishFVG, -3),
+            'bearish' => array_slice($bearishFVG, -3)
+        ];
+    }
 }
 
 

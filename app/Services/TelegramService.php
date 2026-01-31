@@ -209,6 +209,7 @@ class TelegramService
             'EMA+Stochastic' => '⚡',
             'SuperTrend+VWAP' => '📊',
             'Ichimoku+RSI' => '🔥',
+            'Smart Money Concepts' => '💎',
             default => '🔄'
         };
 
@@ -290,6 +291,7 @@ class TelegramService
             'EMA+Stochastic' => '⚡',
             'SuperTrend+VWAP' => '📊',
             'Ichimoku+RSI' => '🔥',
+            'Smart Money Concepts' => '💎',
             default => '🔄'
         };
 
@@ -346,6 +348,14 @@ class TelegramService
         if (isset($signal['supertrend'])) {
             $stEmoji = $signal['supertrend_trend'] === 'UP' ? "🟢" : "🔴";
             $message .= "SuperTrend: {$stEmoji} `$" . rtrim(rtrim($signal['supertrend'], '0'), '.') . "`\n";
+        }
+
+        // Smart Money Concepts данные (только если есть)
+        if (isset($signal['order_block_high']) && isset($signal['order_block_low'])) {
+            $message .= "Order Block: `$" . rtrim(rtrim($signal['order_block_low'], '0'), '.') . "` - `$" . rtrim(rtrim($signal['order_block_high'], '0'), '.') . "`\n";
+        }
+        if (isset($signal['market_structure'])) {
+            $message .= "Market Structure: `{$signal['market_structure']}`\n";
         }
 
         // VWAP (только если есть)
