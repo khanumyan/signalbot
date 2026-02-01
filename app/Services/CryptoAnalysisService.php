@@ -2073,6 +2073,8 @@ class CryptoAnalysisService
 
     /**
      * Определяет Market Structure (BOS/CHOCH)
+     * Улучшенная версия: проверяет BOS/CHOCH не только на текущей свече, но и в недавнем прошлом (последние 15 свечей)
+     * Это важно, так как структура могла измениться недавно, и это все равно подтверждает тренд
      */
     private function detectMarketStructure(array $highs, array $lows, array $closes): ?string
     {
@@ -2081,31 +2083,73 @@ class CryptoAnalysisService
             return null;
         }
 
-        // Находим последние максимумы и минимумы
+        $currentPrice = end($closes);
+        $lookbackPeriod = 15; // Проверяем последние 15 свечей для BOS/CHOCH
+        
+        // Проверяем BOS/CHOCH в последних 15 свечах (не только на текущей)
+        for ($i = max(0, $count - $lookbackPeriod); $i < $count; $i++) {
+            // Находим максимумы и минимумы ДО этой свечи (для определения структуры)
+            $beforeHighs = array_slice($highs, max(0, $i - 10), min(10, $i));
+            $beforeLows = array_slice($lows, max(0, $i - 10), min(10, $i));
+            
+            if (empty($beforeHighs) || empty($beforeLows)) {
+                continue;
+            }
+            
+            $highestHigh = max($beforeHighs);
+            $lowestLow = min($beforeLows);
+            
+            $priceAtI = $closes[$i];
+            $priceBeforeI = $i > 0 ? $closes[$i - 1] : $priceAtI;
+            
+            // BOS (Break Of Structure) - пробой предыдущего максимума/минимума
+            // Проверяем, была ли свеча на индексе $i пробоем структуры
+            if ($priceAtI > $highestHigh && $priceBeforeI <= $highestHigh) {
+                // Если это было недавно (в последних 10 свечах), считаем актуальным
+                if ($count - $i <= 10) {
+                    return 'BULLISH_BOS';
+                }
+            }
+            if ($priceAtI < $lowestLow && $priceBeforeI >= $lowestLow) {
+                if ($count - $i <= 10) {
+                    return 'BEARISH_BOS';
+                }
+            }
+            
+            // CHOCH (Change Of Character) - изменение характера движения
+            // Проверяем изменение тренда на свече $i
+            if ($i >= 2) {
+                $trend = $closes[$i] > $closes[$i - 1] ? 'BULLISH' : 'BEARISH';
+                $prevTrend = $closes[$i - 1] > $closes[$i - 2] ? 'BULLISH' : 'BEARISH';
+                
+                if ($trend !== $prevTrend) {
+                    // Если это было недавно (в последних 10 свечах), считаем актуальным
+                    if ($count - $i <= 10) {
+                        return $trend === 'BULLISH' ? 'BULLISH_CHOCH' : 'BEARISH_CHOCH';
+                    }
+                }
+            }
+        }
+        
+        // Также проверяем текущую свечу (как было раньше)
         $recentHighs = array_slice($highs, -20);
         $recentLows = array_slice($lows, -20);
-        $recentCloses = array_slice($closes, -20);
-
         $highestHigh = max($recentHighs);
         $lowestLow = min($recentLows);
-        $highestIndex = array_search($highestHigh, $recentHighs);
-        $lowestIndex = array_search($lowestLow, $recentLows);
-
-        $currentPrice = end($closes);
         $previousPrice = $closes[$count - 2];
-
-        // BOS (Break Of Structure) - пробой предыдущего максимума/минимума
+        
+        // BOS на текущей свече
         if ($currentPrice > $highestHigh && $previousPrice <= $highestHigh) {
             return 'BULLISH_BOS';
         }
         if ($currentPrice < $lowestLow && $previousPrice >= $lowestLow) {
             return 'BEARISH_BOS';
         }
-
-        // CHOCH (Change Of Character) - изменение характера движения
+        
+        // CHOCH на текущей свече
         $trend = $currentPrice > $previousPrice ? 'BULLISH' : 'BEARISH';
         $prevTrend = $count > 2 ? ($closes[$count - 2] > $closes[$count - 3] ? 'BULLISH' : 'BEARISH') : null;
-
+        
         if ($prevTrend && $trend !== $prevTrend) {
             return $trend === 'BULLISH' ? 'BULLISH_CHOCH' : 'BEARISH_CHOCH';
         }
