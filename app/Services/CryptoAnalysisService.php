@@ -426,6 +426,7 @@ class CryptoAnalysisService
 
     /**
      * Analyze symbol with EMA+RSI+MACD strategy
+     * Работает по прежнему (без изменений) - простая логика без ужесточенных критериев
      */
     public function analyzeEmaRsiMacd(string $symbol, array $params): array
     {
@@ -1538,14 +1539,15 @@ class CryptoAnalysisService
     /**
      * Analyze symbol with Smart Money Concepts (SMC) strategy
      * Based on Order Blocks, Market Structure (BOS/CHOCH), Fair Value Gaps
+     * Согласно инструкции: торговля только по тренду, с подтверждением через ликвидность и структуру
      */
     public function analyzeSmartMoneyConcepts(string $symbol, array $params): array
     {
         $interval = $params['interval'] ?? '15m';
         $limit = $params['limit'] ?? 200;
-        $htfInterval = $params['htf_interval'] ?? '1h'; // Higher timeframe for trend
+        $htfInterval = $params['htf_interval'] ?? '4h'; // H4 для определения тренда (как в инструкции)
         $rsiPeriod = $params['rsi_period'] ?? 14;
-        $orderBlockLookback = $params['order_block_lookback'] ?? 20; // Свечей для поиска Order Blocks
+        $orderBlockLookback = $params['order_block_lookback'] ?? 30; // Больше свечей для лучшего поиска OB
 
         // Fetch klines data
         $klines = $this->fetchKlines($symbol, $interval, $limit);
@@ -1560,6 +1562,7 @@ class CryptoAnalysisService
         $highs = array_map(fn($k) => (float) $k[2], $klines);
         $lows = array_map(fn($k) => (float) $k[3], $klines);
         $volumes = array_map(fn($k) => (float) $k[5], $klines);
+        $opens = array_map(fn($k) => (float) $k[1], $klines);
 
         // HTF data
         $htfCloses = array_map(fn($k) => (float) $k[4], $htfKlines);
@@ -1574,90 +1577,187 @@ class CryptoAnalysisService
         $htfEma = $this->calculateEMA($htfCloses, 50);
         $atr = $this->calculateATR($highs, $lows, $closes, 14);
 
-        // 🔥 Определяем HTF тренд (Smart Money Concepts требует торговлю по тренду)
+        // 🔥 ШАГ 1: Определяем старший тренд на H4 (как в инструкции)
+        // Тренд = главное направление торговли, без тренда не торгуем
         $htfTrend = 'NEUTRAL';
-        if ($price > $htfEma && $htfRsi > 50) {
+        $htfPrice = end($htfCloses);
+        
+        // Более строгое определение тренда: цена должна быть четко выше/ниже EMA и RSI должен подтверждать
+        if ($htfPrice > $htfEma * 1.002 && $htfRsi > 52) { // 0.2% буфер для фильтрации шума
             $htfTrend = 'BULLISH';
-        } elseif ($price < $htfEma && $htfRsi < 50) {
+        } elseif ($htfPrice < $htfEma * 0.998 && $htfRsi < 48) {
             $htfTrend = 'BEARISH';
         }
-
-        // 🔥 Находим Order Blocks (последние сильные свечи перед разворотом)
-        $orderBlocks = $this->findOrderBlocks($highs, $lows, $closes, $volumes, $orderBlockLookback);
         
-        // 🔥 Определяем Market Structure (BOS/CHOCH)
+        // 🔥 КРИТИЧНО: Если нет четкого тренда - не торгуем (пропускаем боковик)
+        if ($htfTrend === 'NEUTRAL') {
+            return [
+                'price' => $price,
+                'rsi' => $rsi,
+                'ema' => $ema,
+                'atr' => $atr,
+                'signal' => 'HOLD',
+                'long_probability' => 50,
+                'short_probability' => 50,
+                'stop_loss' => $price,
+                'take_profit' => $price,
+                'reason' => 'Нет четкого тренда на HTF (H4) - пропуск согласно SMC правилам',
+                'strength' => 'WEAK',
+                'htf_trend' => $htfTrend,
+                'htf_rsi' => $htfRsi,
+                'market_structure' => null
+            ];
+        }
+
+        // 🔥 ШАГ 2: Находим Order Blocks (ключевые зоны)
+        $orderBlocks = $this->findOrderBlocks($highs, $lows, $closes, $volumes, $opens, $orderBlockLookback);
+        
+        // 🔥 ШАГ 3: Определяем Market Structure (BOS/CHOCH)
         $marketStructure = $this->detectMarketStructure($highs, $lows, $closes);
 
-        // 🔥 Находим Fair Value Gaps (FVG)
+        // 🔥 ШАГ 4: Находим Fair Value Gaps (FVG)
         $fvg = $this->findFairValueGaps($highs, $lows, $closes);
+        
+        // 🔥 ШАГ 5: Находим зоны ликвидности (Liquidity Areas - места где были стоп-лоссы)
+        $liquidityAreas = $this->findLiquidityAreas($highs, $lows, $closes);
 
-        // Calculate probabilities
+        // 🔥 ШАГ 6: Проверяем свечной паттерн для подтверждения входа
+        $candleConfirmation = $this->checkCandleConfirmation($opens, $highs, $lows, $closes, $htfTrend);
+
+        // Calculate probabilities - СТРОГИЕ КРИТЕРИИ
         $longScore = 0;
         $shortScore = 0;
+        $activeOrderBlock = null;
+        $hasLiquidity = false;
 
-        // BUY conditions: Бычий тренд + возврат к Bullish Order Block
+        // BUY conditions: Бычий тренд + возврат к Bullish Order Block + ликвидность + подтверждение
         if ($htfTrend === 'BULLISH') {
-            $longScore += 30; // Базовый балл за тренд
-            
-            // Проверяем возврат к Bullish Order Block
+            // 1. Проверяем возврат к Bullish Order Block (ОБЯЗАТЕЛЬНО)
             foreach ($orderBlocks['bullish'] as $ob) {
-                if ($price >= $ob['low'] && $price <= $ob['high']) {
-                    $longScore += 40; // Цена в зоне Bullish OB
+                // Проверяем точный возврат к OB (цена в зоне или очень близко)
+                $obRange = ($ob['high'] - $ob['low']) * 0.1; // 10% от размера OB как допустимая зона
+                if ($price >= ($ob['low'] - $obRange) && $price <= ($ob['high'] + $obRange)) {
+                    $longScore += 50; // Критично важно - цена вернулась к OB
+                    $activeOrderBlock = $ob;
+                    
+                    // 2. Проверяем наличие ликвидности НИЖЕ Order Block (ОБЯЗАТЕЛЬНО)
+                    foreach ($liquidityAreas['below'] as $liq) {
+                        if ($liq['price'] < $ob['low'] && $liq['price'] > $ob['low'] * 0.95) {
+                            $longScore += 30; // Ликвидность найдена ниже OB
+                            $hasLiquidity = true;
+                            break;
+                        }
+                    }
                     break;
-                } elseif ($price > $ob['low'] * 0.98 && $price < $ob['low'] * 1.02) {
-                    $longScore += 25; // Близко к Bullish OB
                 }
             }
 
-            // Проверяем Fair Value Gap для входа
+            // 3. Market Structure подтверждение (BOS/CHOCH) - ОБЯЗАТЕЛЬНО для сильного сигнала
+            if ($marketStructure === 'BULLISH_BOS' || $marketStructure === 'BULLISH_CHOCH') {
+                $longScore += 25;
+            }
+
+            // 4. Fair Value Gap как дополнительное подтверждение
             foreach ($fvg['bullish'] as $gap) {
                 if ($price >= $gap['bottom'] && $price <= $gap['top']) {
-                    $longScore += 30; // Цена в Bullish FVG
+                    $longScore += 15; // Дополнительный плюс за FVG
                     break;
                 }
             }
 
-            // Market Structure подтверждение
-            if ($marketStructure === 'BULLISH_BOS' || $marketStructure === 'BULLISH_CHOCH') {
+            // 5. Свечное подтверждение (бычья свеча после возврата к OB)
+            if ($candleConfirmation['bullish']) {
                 $longScore += 20;
             }
 
-            // RSI фильтр
-            if ($rsi <= 40 && $rsi >= 20) {
-                $longScore += 15; // RSI в зоне для входа
+            // 6. RSI фильтр (не перекупленность)
+            if ($rsi >= 25 && $rsi <= 45) {
+                $longScore += 10;
             }
         }
 
-        // SELL conditions: Медвежий тренд + возврат к Bearish Order Block
+        // SELL conditions: Медвежий тренд + возврат к Bearish Order Block + ликвидность + подтверждение
         if ($htfTrend === 'BEARISH') {
-            $shortScore += 30; // Базовый балл за тренд
-            
-            // Проверяем возврат к Bearish Order Block
+            // 1. Проверяем возврат к Bearish Order Block (ОБЯЗАТЕЛЬНО)
             foreach ($orderBlocks['bearish'] as $ob) {
-                if ($price >= $ob['low'] && $price <= $ob['high']) {
-                    $shortScore += 40; // Цена в зоне Bearish OB
+                // Проверяем точный возврат к OB
+                $obRange = ($ob['high'] - $ob['low']) * 0.1;
+                if ($price >= ($ob['low'] - $obRange) && $price <= ($ob['high'] + $obRange)) {
+                    $shortScore += 50; // Критично важно
+                    $activeOrderBlock = $ob;
+                    
+                    // 2. Проверяем наличие ликвидности ВЫШЕ Order Block (ОБЯЗАТЕЛЬНО)
+                    foreach ($liquidityAreas['above'] as $liq) {
+                        if ($liq['price'] > $ob['high'] && $liq['price'] < $ob['high'] * 1.05) {
+                            $shortScore += 30; // Ликвидность найдена выше OB
+                            $hasLiquidity = true;
+                            break;
+                        }
+                    }
                     break;
-                } elseif ($price > $ob['high'] * 0.98 && $price < $ob['high'] * 1.02) {
-                    $shortScore += 25; // Близко к Bearish OB
                 }
             }
 
-            // Проверяем Fair Value Gap для входа
+            // 3. Market Structure подтверждение
+            if ($marketStructure === 'BEARISH_BOS' || $marketStructure === 'BEARISH_CHOCH') {
+                $shortScore += 25;
+            }
+
+            // 4. Fair Value Gap
             foreach ($fvg['bearish'] as $gap) {
                 if ($price >= $gap['bottom'] && $price <= $gap['top']) {
-                    $shortScore += 30; // Цена в Bearish FVG
+                    $shortScore += 15;
                     break;
                 }
             }
 
-            // Market Structure подтверждение
-            if ($marketStructure === 'BEARISH_BOS' || $marketStructure === 'BEARISH_CHOCH') {
+            // 5. Свечное подтверждение
+            if ($candleConfirmation['bearish']) {
                 $shortScore += 20;
             }
 
-            // RSI фильтр
-            if ($rsi >= 60 && $rsi <= 80) {
-                $shortScore += 15; // RSI в зоне для входа
+            // 6. RSI фильтр
+            if ($rsi >= 55 && $rsi <= 75) {
+                $shortScore += 10;
+            }
+        }
+        
+        // 🔥 КРИТИЧНО: Если нет возврата к Order Block или нет ликвидности - не торгуем
+        // ДОПОЛНИТЕЛЬНО: Требуем подтверждение через Market Structure для более строгой фильтрации
+        if (!$activeOrderBlock || !$hasLiquidity) {
+            return [
+                'price' => $price,
+                'rsi' => $rsi,
+                'ema' => $ema,
+                'atr' => $atr,
+                'signal' => 'HOLD',
+                'long_probability' => 50,
+                'short_probability' => 50,
+                'stop_loss' => $price,
+                'take_profit' => $price,
+                'reason' => (!$activeOrderBlock ? 'Нет возврата к Order Block' : 'Нет ликвидности рядом с Order Block') . ' - пропуск согласно SMC правилам',
+                'strength' => 'WEAK',
+                'htf_trend' => $htfTrend,
+                'htf_rsi' => $htfRsi,
+                'market_structure' => $marketStructure
+            ];
+        }
+        
+        // 🔥 ДОПОЛНИТЕЛЬНЫЙ ФИЛЬТР: Для STRONG требуется обязательное подтверждение через BOS/CHOCH
+        // Если нет подтверждения структуры, снижаем баллы
+        $structureConfirmation = false;
+        if ($htfTrend === 'BULLISH' && ($marketStructure === 'BULLISH_BOS' || $marketStructure === 'BULLISH_CHOCH')) {
+            $structureConfirmation = true;
+        } elseif ($htfTrend === 'BEARISH' && ($marketStructure === 'BEARISH_BOS' || $marketStructure === 'BEARISH_CHOCH')) {
+            $structureConfirmation = true;
+        }
+        
+        // Если нет подтверждения структуры, снижаем баллы на 20 (ужесточение)
+        if (!$structureConfirmation) {
+            if ($htfTrend === 'BULLISH') {
+                $longScore = max(0, $longScore - 20);
+            } else {
+                $shortScore = max(0, $shortScore - 20);
             }
         }
 
@@ -1666,24 +1766,27 @@ class CryptoAnalysisService
         $longProb = round(($longScore / $totalScore) * 100);
         $shortProb = round(($shortScore / $totalScore) * 100);
 
-        // Determine signal
-        $signal = $longProb > $shortProb ? 'BUY' : 'SELL';
-        if (abs($longProb - $shortProb) < 15) {
-            $signal = 'HOLD';
+        // Determine signal - только если есть достаточный перевес (ПОВЫШЕННЫЕ ТРЕБОВАНИЯ)
+        $signal = 'HOLD';
+        if ($longScore > $shortScore && $longScore >= 100) { // Минимум 100 баллов для BUY (было 80)
+            $signal = 'BUY';
+        } elseif ($shortScore > $longScore && $shortScore >= 100) { // Минимум 100 баллов для SELL (было 80)
+            $signal = 'SELL';
         }
 
-        // 🔥 УЖЕСТОЧЕННЫЕ КРИТЕРИИ: Только STRONG и MEDIUM
+        // 🔥 УЖЕСТОЧЕННЫЕ КРИТЕРИИ: Только STRONG сигналы (ПОВЫШЕННЫЕ ПОРОГИ)
         $strength = 'WEAK';
         if ($signal !== 'HOLD') {
-            if (abs($longProb - $shortProb) >= 25) {
+            $winningScore = $signal === 'BUY' ? $longScore : $shortScore;
+            if ($winningScore >= 140) { // STRONG: минимум 140 баллов (было 120)
                 $strength = 'STRONG';
-            } elseif (abs($longProb - $shortProb) >= 20) {
+            } elseif ($winningScore >= 120) { // MEDIUM: минимум 120 баллов (было 100)
                 $strength = 'MEDIUM';
             }
         }
 
-        // Если WEAK - возвращаем HOLD
-        if ($strength === 'WEAK') {
+        // Если WEAK или недостаточно критериев - возвращаем HOLD
+        if ($strength === 'WEAK' || $signal === 'HOLD') {
             return [
                 'price' => $price,
                 'rsi' => $rsi,
@@ -1694,7 +1797,7 @@ class CryptoAnalysisService
                 'short_probability' => $shortProb,
                 'stop_loss' => $price,
                 'take_profit' => $price,
-                'reason' => 'Сигнал слишком слабый (WEAK) - отфильтрован',
+                'reason' => 'Недостаточно критериев для входа (нужно: возврат к OB + ликвидность + подтверждение структуры)',
                 'strength' => 'WEAK',
                 'htf_trend' => $htfTrend,
                 'htf_rsi' => $htfRsi,
@@ -1702,44 +1805,81 @@ class CryptoAnalysisService
             ];
         }
 
-        // Calculate SL/TP (на основе ATR и Order Blocks)
-        $stopLossMultiplier = $params['stop_loss_multiplier'] ?? 2.3;
-        $takeProfitMultiplier = $params['take_profit_multiplier'] ?? 3.0;
+        // 🔥 ШАГ 7: Расчет SL/TP согласно инструкции
+        // SL за границу OB или Liquidity Area
+        // TP на ближайших зонах ликвидности или ключевых уровнях структуры
+        $orderBlockHigh = $activeOrderBlock['high'];
+        $orderBlockLow = $activeOrderBlock['low'];
+        $nearestLiquidity = null;
 
-        $orderBlockHigh = null;
-        $orderBlockLow = null;
-
-        if ($signal === 'BUY' && !empty($orderBlocks['bullish'])) {
-            $ob = $orderBlocks['bullish'][0];
-            $orderBlockHigh = $ob['high'];
-            $orderBlockLow = $ob['low'];
-            $stopLoss = min($price - ($atr * $stopLossMultiplier), $orderBlockLow * 0.98);
-            $takeProfit = $price + ($atr * $takeProfitMultiplier);
-        } elseif ($signal === 'SELL' && !empty($orderBlocks['bearish'])) {
-            $ob = $orderBlocks['bearish'][0];
-            $orderBlockHigh = $ob['high'];
-            $orderBlockLow = $ob['low'];
-            $stopLoss = max($price + ($atr * $stopLossMultiplier), $orderBlockHigh * 1.02);
-            $takeProfit = $price - ($atr * $takeProfitMultiplier);
-        } else {
-            // Fallback если нет Order Blocks
-            if ($signal === 'BUY') {
-                $stopLoss = $price - ($atr * $stopLossMultiplier);
-                $takeProfit = $price + ($atr * $takeProfitMultiplier);
-            } else {
-                $stopLoss = $price + ($atr * $stopLossMultiplier);
-                $takeProfit = $price - ($atr * $takeProfitMultiplier);
+        if ($signal === 'BUY') {
+            // Стоп-лосс: ниже Order Block или ниже ближайшей ликвидности
+            $stopLoss = $orderBlockLow * 0.995; // На 0.5% ниже OB
+            
+            // Ищем ближайшую ликвидность ниже для более точного SL
+            $nearestLiquidityForSL = null;
+            foreach ($liquidityAreas['below'] as $liq) {
+                if ($liq['price'] < $orderBlockLow && ($nearestLiquidityForSL === null || $liq['price'] > $nearestLiquidityForSL)) {
+                    $nearestLiquidityForSL = $liq['price'];
+                }
+            }
+            if ($nearestLiquidityForSL && $nearestLiquidityForSL < $stopLoss) {
+                $stopLoss = $nearestLiquidityForSL * 0.995;
+            }
+            
+            // Тейк-профит: на ближайшей зоне ликвидности выше или на основе структуры
+            $takeProfit = $price + ($atr * 3.5); // Базовый TP
+            
+            // Ищем ближайшую ликвидность выше для TP
+            $nearestLiquidityForTP = null;
+            foreach ($liquidityAreas['above'] as $liq) {
+                if ($liq['price'] > $price && ($nearestLiquidityForTP === null || $liq['price'] < $nearestLiquidityForTP)) {
+                    $nearestLiquidityForTP = $liq['price'];
+                }
+            }
+            if ($nearestLiquidityForTP && $nearestLiquidityForTP > $price) {
+                $takeProfit = $nearestLiquidityForTP * 0.998; // Чуть ниже ликвидности
+            }
+        } else { // SELL
+            // Стоп-лосс: выше Order Block или выше ближайшей ликвидности
+            $stopLoss = $orderBlockHigh * 1.005; // На 0.5% выше OB
+            
+            // Ищем ближайшую ликвидность выше для более точного SL
+            $nearestLiquidityForSL = null;
+            foreach ($liquidityAreas['above'] as $liq) {
+                if ($liq['price'] > $orderBlockHigh && ($nearestLiquidityForSL === null || $liq['price'] < $nearestLiquidityForSL)) {
+                    $nearestLiquidityForSL = $liq['price'];
+                }
+            }
+            if ($nearestLiquidityForSL && $nearestLiquidityForSL > $stopLoss) {
+                $stopLoss = $nearestLiquidityForSL * 1.005;
+            }
+            
+            // Тейк-профит: на ближайшей зоне ликвидности ниже
+            $takeProfit = $price - ($atr * 3.5); // Базовый TP
+            
+            // Ищем ближайшую ликвидность ниже для TP
+            $nearestLiquidityForTP = null;
+            foreach ($liquidityAreas['below'] as $liq) {
+                if ($liq['price'] < $price && ($nearestLiquidityForTP === null || $liq['price'] > $nearestLiquidityForTP)) {
+                    $nearestLiquidityForTP = $liq['price'];
+                }
+            }
+            if ($nearestLiquidityForTP && $nearestLiquidityForTP < $price) {
+                $takeProfit = $nearestLiquidityForTP * 1.002; // Чуть выше ликвидности
             }
         }
 
         // Generate reason
         $reasons = [];
-        $reasons[] = "HTF тренд: {$htfTrend}";
+        $reasons[] = "HTF тренд (H4): {$htfTrend}";
+        $reasons[] = "Возврат к Order Block: " . number_format($orderBlockLow, 2) . " - " . number_format($orderBlockHigh, 2);
+        $reasons[] = "Ликвидность найдена";
         if ($marketStructure) {
             $reasons[] = "Market Structure: {$marketStructure}";
         }
-        if ($orderBlockHigh && $orderBlockLow) {
-            $reasons[] = "Order Block: " . number_format($orderBlockLow, 2) . " - " . number_format($orderBlockHigh, 2);
+        if ($candleConfirmation[$signal === 'BUY' ? 'bullish' : 'bearish']) {
+            $reasons[] = "Свечное подтверждение";
         }
         $reasons[] = "RSI: {$rsi}";
 
@@ -1766,8 +1906,9 @@ class CryptoAnalysisService
 
     /**
      * Находит Order Blocks (последние сильные свечи перед разворотом)
+     * Улучшенная версия: более строгие критерии для определения OB
      */
-    private function findOrderBlocks(array $highs, array $lows, array $closes, array $volumes, int $lookback): array
+    private function findOrderBlocks(array $highs, array $lows, array $closes, array $volumes, array $opens, int $lookback): array
     {
         $bullishOB = [];
         $bearishOB = [];
@@ -1778,17 +1919,31 @@ class CryptoAnalysisService
         }
 
         // Ищем последние сильные движения перед разворотом
-        for ($i = $count - $lookback; $i < $count - 1; $i++) {
+        // Ужесточенные критерии: больший объем, четкий разворот
+        for ($i = $count - $lookback; $i < $count - 3; $i++) {
             $currentHigh = $highs[$i];
             $currentLow = $lows[$i];
             $currentClose = $closes[$i];
+            $currentOpen = $opens[$i];
             $currentVolume = $volumes[$i];
             $avgVolume = array_sum(array_slice($volumes, max(0, $i - 20), 20)) / 20;
+            
+            // Размер свечи (body)
+            $bodySize = abs($currentClose - $currentOpen);
+            $candleRange = $currentHigh - $currentLow;
+            $bodyRatio = $candleRange > 0 ? $bodySize / $candleRange : 0;
 
-            // Bullish Order Block: сильная бычья свеча перед разворотом вниз
-            if ($currentClose > ($currentHigh + $currentLow) / 2 && $currentVolume > $avgVolume * 1.5) {
-                // Проверяем, был ли разворот после
-                if ($i + 1 < $count && $closes[$i + 1] < $currentClose) {
+            // Bullish Order Block: сильная бычья свеча (большое тело, высокий объем) перед разворотом вниз
+            // ПОВЫШЕННЫЕ ТРЕБОВАНИЯ: тело 70%+ (было 60%), объем 2.0x+ (было 1.8x)
+            if ($currentClose > $currentOpen && $bodyRatio > 0.7 && $currentVolume > $avgVolume * 2.0) {
+                // Проверяем, был ли четкий разворот после (минимум 2-3 свечи вниз)
+                $reversalConfirmed = false;
+                if ($i + 3 < $count) {
+                    $nextCloses = array_slice($closes, $i + 1, 3);
+                    $reversalConfirmed = count(array_filter($nextCloses, fn($c) => $c < $currentClose)) >= 2;
+                }
+                
+                if ($reversalConfirmed) {
                     $bullishOB[] = [
                         'high' => $currentHigh,
                         'low' => $currentLow,
@@ -1798,9 +1953,16 @@ class CryptoAnalysisService
             }
 
             // Bearish Order Block: сильная медвежья свеча перед разворотом вверх
-            if ($currentClose < ($currentHigh + $currentLow) / 2 && $currentVolume > $avgVolume * 1.5) {
-                // Проверяем, был ли разворот после
-                if ($i + 1 < $count && $closes[$i + 1] > $currentClose) {
+            // ПОВЫШЕННЫЕ ТРЕБОВАНИЯ: тело 70%+ (было 60%), объем 2.0x+ (было 1.8x)
+            if ($currentClose < $currentOpen && $bodyRatio > 0.7 && $currentVolume > $avgVolume * 2.0) {
+                // Проверяем четкий разворот вверх
+                $reversalConfirmed = false;
+                if ($i + 3 < $count) {
+                    $nextCloses = array_slice($closes, $i + 1, 3);
+                    $reversalConfirmed = count(array_filter($nextCloses, fn($c) => $c > $currentClose)) >= 2;
+                }
+                
+                if ($reversalConfirmed) {
                     $bearishOB[] = [
                         'high' => $currentHigh,
                         'low' => $currentLow,
@@ -1810,10 +1972,102 @@ class CryptoAnalysisService
             }
         }
 
-        // Берем только последние 3 Order Blocks
+        // Берем только последние 5 Order Blocks (больше для выбора лучшего)
         return [
-            'bullish' => array_slice($bullishOB, -3),
-            'bearish' => array_slice($bearishOB, -3)
+            'bullish' => array_slice($bullishOB, -5),
+            'bearish' => array_slice($bearishOB, -5)
+        ];
+    }
+    
+    /**
+     * Находит зоны ликвидности (Liquidity Areas) - места где были стоп-лоссы
+     * Ликвидность = локальные максимумы/минимумы, которые могут быть пробойными
+     */
+    private function findLiquidityAreas(array $highs, array $lows, array $closes): array
+    {
+        $count = count($closes);
+        $liquidityAbove = [];
+        $liquidityBelow = [];
+        
+        if ($count < 20) {
+            return ['above' => [], 'below' => []];
+        }
+        
+        // Ищем локальные максимумы (ликвидация лонгов - ликвидность выше)
+        for ($i = 10; $i < $count - 5; $i++) {
+            $isLocalHigh = true;
+            for ($j = $i - 5; $j <= $i + 5; $j++) {
+                if ($j !== $i && $j >= 0 && $j < $count && $highs[$j] >= $highs[$i]) {
+                    $isLocalHigh = false;
+                    break;
+                }
+            }
+            if ($isLocalHigh) {
+                $liquidityAbove[] = [
+                    'price' => $highs[$i],
+                    'index' => $i
+                ];
+            }
+        }
+        
+        // Ищем локальные минимумы (ликвидация шортов - ликвидность ниже)
+        for ($i = 10; $i < $count - 5; $i++) {
+            $isLocalLow = true;
+            for ($j = $i - 5; $j <= $i + 5; $j++) {
+                if ($j !== $i && $j >= 0 && $j < $count && $lows[$j] <= $lows[$i]) {
+                    $isLocalLow = false;
+                    break;
+                }
+            }
+            if ($isLocalLow) {
+                $liquidityBelow[] = [
+                    'price' => $lows[$i],
+                    'index' => $i
+                ];
+            }
+        }
+        
+        // Сортируем по близости к текущей цене
+        $currentPrice = end($closes);
+        usort($liquidityAbove, fn($a, $b) => abs($a['price'] - $currentPrice) <=> abs($b['price'] - $currentPrice));
+        usort($liquidityBelow, fn($a, $b) => abs($a['price'] - $currentPrice) <=> abs($b['price'] - $currentPrice));
+        
+        return [
+            'above' => array_slice($liquidityAbove, 0, 5),
+            'below' => array_slice($liquidityBelow, 0, 5)
+        ];
+    }
+    
+    /**
+     * Проверяет свечное подтверждение для входа
+     * Бычий тренд: бычья свеча после возврата к OB
+     * Медвежий тренд: медвежья свеча после возврата к OB
+     */
+    private function checkCandleConfirmation(array $opens, array $highs, array $lows, array $closes, string $trend): array
+    {
+        $count = count($closes);
+        if ($count < 2) {
+            return ['bullish' => false, 'bearish' => false];
+        }
+        
+        $lastOpen = $opens[$count - 1];
+        $lastClose = $closes[$count - 1];
+        $lastHigh = $highs[$count - 1];
+        $lastLow = $lows[$count - 1];
+        
+        $bodySize = abs($lastClose - $lastOpen);
+        $candleRange = $lastHigh - $lastLow;
+        $bodyRatio = $candleRange > 0 ? $bodySize / $candleRange : 0;
+        
+        // Бычье подтверждение: закрытие выше открытия, тело > 50% свечи
+        $bullishConfirmation = $lastClose > $lastOpen && $bodyRatio > 0.5;
+        
+        // Медвежье подтверждение: закрытие ниже открытия, тело > 50% свечи
+        $bearishConfirmation = $lastClose < $lastOpen && $bodyRatio > 0.5;
+        
+        return [
+            'bullish' => $bullishConfirmation,
+            'bearish' => $bearishConfirmation
         ];
     }
 

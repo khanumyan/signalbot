@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\PhoneVerification;
 use App\Models\User;
+use App\Models\UserWallet;
 use App\Services\TelegramService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -22,10 +23,15 @@ class PhoneAuthController extends Controller
     /**
      * Show phone verification form
      */
-    public function showPhoneForm()
+    public function showPhoneForm(Request $request)
     {
         if (Auth::check()) {
             return redirect()->route('home');
+        }
+        
+        // Save referral code to session if provided
+        if ($request->has('referrelCode') && !empty($request->referrelCode)) {
+            session(['referrelCode' => $request->referrelCode]);
         }
         
         $botUsername = $this->telegramService->getBotUsername();
@@ -84,20 +90,50 @@ class PhoneAuthController extends Controller
             ->first();
 
         if ($verification) {
-            // Create or update user
-            $user = User::firstOrCreate(
-                ['phone' => $verification->phone],
-                [
+            // Check if user already exists
+            $user = User::where('phone', $verification->phone)->first();
+            $isNewUser = !$user;
+
+            if (!$user) {
+                // Generate unique referral code
+                do {
+                    $referralCode = $this->generateReferralCode();
+                } while (User::where('share_referal_code', $referralCode)->exists());
+
+                // Find referrer by referral code if provided in session
+                $whoReferred = null;
+                $referrelCode = session('referrelCode');
+                if ($referrelCode) {
+                    $referrer = User::where('share_referal_code', $referrelCode)->first();
+                    if ($referrer) {
+                        $whoReferred = $referrer->id;
+                    }
+                    // Clear referral code from session after use
+                    session()->forget('referrelCode');
+                }
+
+                // Create new user
+                $user = User::create([
+                    'phone' => $verification->phone,
                     'name' => 'User ' . substr($verification->phone, -4),
                     'email' => 'user_' . $verification->phone . '@telegram.local',
                     'password' => bcrypt(str()->random(32)), // Random password, not used for Telegram auth
                     'telegram_chat_id' => $verification->telegram_chat_id,
-                ]
-            );
+                    'share_referal_code' => $referralCode,
+                    'who_referred' => $whoReferred,
+                ]);
 
-            // Update telegram_chat_id if changed
-            if ($user->telegram_chat_id !== $verification->telegram_chat_id) {
-                $user->update(['telegram_chat_id' => $verification->telegram_chat_id]);
+                // Create wallet for new user
+                UserWallet::create([
+                    'user_id' => $user->id,
+                    'amount' => 0.00,
+                    'currency' => 'USD',
+                ]);
+            } else {
+                // Update telegram_chat_id if changed
+                if ($user->telegram_chat_id !== $verification->telegram_chat_id) {
+                    $user->update(['telegram_chat_id' => $verification->telegram_chat_id]);
+                }
             }
 
             // Login user
@@ -115,5 +151,22 @@ class PhoneAuthController extends Controller
         return response()->json([
             'verified' => false,
         ]);
+    }
+
+    /**
+     * Generate unique referral code (12 characters: uppercase letters and numbers)
+     * Format: WRDCe48DRvce (mixed case letters and numbers)
+     */
+    private function generateReferralCode(): string
+    {
+        $characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+        $code = '';
+        $length = 12;
+        
+        for ($i = 0; $i < $length; $i++) {
+            $code .= $characters[rand(0, strlen($characters) - 1)];
+        }
+        
+        return $code;
     }
 }

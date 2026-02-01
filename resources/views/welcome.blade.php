@@ -57,6 +57,18 @@
             left: 20px;
             font-size: 14px;
             color: #94a3b8;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            padding: 8px 12px;
+            border-radius: 8px;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .user-info:hover {
+            background: rgba(168, 85, 247, 0.1);
+            color: #a855f7;
+            transform: translateY(-2px);
         }
 
         .header-title {
@@ -323,9 +335,9 @@
 <body>
     <!-- Header -->
     <div class="header">
-        <div class="user-info">
+        <a href="{{ route('profile.index') }}" class="user-info">
             👤 {{ Auth::user()->name }}
-        </div>
+        </a>
         <form method="POST" action="{{ route('logout') }}" id="logoutForm" style="position: absolute; top: 20px; right: 20px;">
             @csrf
             <button type="button" class="logout-btn" onclick="handleLogout()">

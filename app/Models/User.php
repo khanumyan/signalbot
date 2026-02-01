@@ -5,6 +5,7 @@ namespace App\Models;
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
@@ -25,6 +26,8 @@ class User extends Authenticatable
         'phone',
         'telegram_chat_id',
         'verification_token',
+        'share_referal_code',
+        'who_referred',
     ];
 
     /**
@@ -56,5 +59,13 @@ class User extends Authenticatable
     public function subscriptions(): HasMany
     {
         return $this->hasMany(Subscription::class);
+    }
+
+    /**
+     * Отношение к кошельку
+     */
+    public function wallet(): HasOne
+    {
+        return $this->hasOne(UserWallet::class);
     }
 }

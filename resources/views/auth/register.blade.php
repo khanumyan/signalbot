@@ -180,6 +180,10 @@
 
             <form method="POST" action="{{ route('register') }}">
                 @csrf
+                
+                @if(isset($referrelCode) && $referrelCode)
+                    <input type="hidden" name="referrelCode" value="{{ $referrelCode }}">
+                @endif
 
                 <div class="form-group">
                     <label class="form-label" for="name">Имя</label>

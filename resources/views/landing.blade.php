@@ -401,7 +401,7 @@
             </a>
             <div class="header-actions">
                 <a href="{{ route('login') }}" class="btn btn-outline">Войти</a>
-                <a href="{{ route('register') }}" class="btn btn-primary">Регистрация</a>
+                <a href="{{ route('register') }}{{ $referrelCode ? '?referrelCode=' . $referrelCode : '' }}" class="btn btn-primary">Регистрация</a>
             </div>
         </div>
     </header>
@@ -412,7 +412,7 @@
             <h1>Автоматизированные торговые сигналы для криптовалют</h1>
             <p>Получайте торговые сигналы на основе технического анализа. Наша система анализирует рынок 24/7 и отправляет вам лучшие возможности для торговли.</p>
             <div class="hero-actions">
-                <a href="{{ route('register') }}" class="btn btn-primary">Начать бесплатно</a>
+                <a href="{{ route('register') }}{{ $referrelCode ? '?referrelCode=' . $referrelCode : '' }}" class="btn btn-primary">Начать бесплатно</a>
                 <a href="#about" class="btn btn-outline">Узнать больше</a>
             </div>
         </div>

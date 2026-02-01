@@ -57,6 +57,12 @@ Route::middleware('auth')->group(function () {
     // Crypto News routes
     Route::get('/crypto-news', [App\Http\Controllers\CryptoNewsController::class, 'index'])->name('crypto-news.index');
     Route::get('/crypto-news/{id}', [App\Http\Controllers\CryptoNewsController::class, 'show'])->name('crypto-news.show');
+
+    // Profile routes (Личный кабинет)
+    Route::get('/profile', [App\Http\Controllers\ProfileController::class, 'index'])->name('profile.index');
+    Route::get('/api/profile/wallet', [App\Http\Controllers\ProfileController::class, 'getWallet'])->name('profile.wallet');
+    Route::get('/api/profile/referral-link', [App\Http\Controllers\ProfileController::class, 'getReferralLink'])->name('profile.referral-link');
+    Route::get('/api/profile/subscriptions', [App\Http\Controllers\ProfileController::class, 'getSubscriptions'])->name('profile.subscriptions');
 });
 
 // Telegram Webhook routes (public, no auth required)

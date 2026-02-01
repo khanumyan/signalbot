@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Models\UserWallet;
 use App\Services\TelegramService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -23,12 +24,16 @@ class RegisterController extends Controller
     /**
      * Show the registration form
      */
-    public function showRegisterForm()
+    public function showRegisterForm(Request $request)
     {
         if (Auth::check()) {
             return redirect()->route('home');
         }
-        return view('auth.register');
+        
+        // Get referral code from query parameter
+        $referrelCode = $request->query('referrelCode');
+        
+        return view('auth.register', compact('referrelCode'));
     }
 
     /**
@@ -55,12 +60,35 @@ class RegisterController extends Controller
             $token = 'w' . str_pad((string) rand(10000000, 99999999), 8, '0', STR_PAD_LEFT);
         } while (User::where('verification_token', $token)->exists());
 
+        // Generate unique referral code (12 characters: letters and numbers)
+        do {
+            $referralCode = $this->generateReferralCode();
+        } while (User::where('share_referal_code', $referralCode)->exists());
+
+        // Find referrer by referral code if provided
+        $whoReferred = null;
+        if ($request->has('referrelCode') && !empty($request->referrelCode)) {
+            $referrer = User::where('share_referal_code', $request->referrelCode)->first();
+            if ($referrer) {
+                $whoReferred = $referrer->id;
+            }
+        }
+
         $user = User::create([
             'name' => $request->name,
             'email' => $request->email,
             'phone' => $request->phone,
             'password' => Hash::make($request->password),
             'verification_token' => $token,
+            'share_referal_code' => $referralCode,
+            'who_referred' => $whoReferred,
+        ]);
+
+        // Create wallet for new user
+        UserWallet::create([
+            'user_id' => $user->id,
+            'amount' => 0.00,
+            'currency' => 'USD',
         ]);
 
         // Show verification page with bot link
@@ -100,5 +128,22 @@ class RegisterController extends Controller
         return response()->json([
             'verified' => false,
         ]);
+    }
+
+    /**
+     * Generate unique referral code (12 characters: uppercase letters and numbers)
+     * Format: WRDCe48DRvce (mixed case letters and numbers)
+     */
+    private function generateReferralCode(): string
+    {
+        $characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+        $code = '';
+        $length = 12;
+        
+        for ($i = 0; $i < $length; $i++) {
+            $code .= $characters[rand(0, strlen($characters) - 1)];
+        }
+        
+        return $code;
     }
 }

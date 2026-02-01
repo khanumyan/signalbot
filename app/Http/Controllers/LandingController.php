@@ -9,14 +9,17 @@ class LandingController extends Controller
     /**
      * Display landing page
      */
-    public function index()
+    public function index(Request $request)
     {
         // If user is authenticated, redirect to dashboard
         if (auth()->check()) {
             return redirect()->route('home');
         }
 
-        return view('landing');
+        // Get referral code from query parameter
+        $referrelCode = $request->query('referrelCode');
+        
+        return view('landing', compact('referrelCode'));
     }
 }
 
