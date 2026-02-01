@@ -455,7 +455,7 @@ class TelegramService
         try {
             $webAppUrl = env('APP_URL', 'http://localhost:8000');
 
-            $message = "🤖 *Добро пожаловать в Traiding Helper Pro!*\n\n";
+            $message = "🤖 *Добро пожаловать в Trading Helper Pro!*\n\n";
             $message .= "📊 *Автоматизированная система анализа криптовалютных рынков*\n\n";
             $message .= "✨ *Возможности бота:*\n";
             $message .= "📈 История торговых сигналов с фильтрацией\n";

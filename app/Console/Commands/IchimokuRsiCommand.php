@@ -33,9 +33,6 @@ class IchimokuRsiCommand extends Command
 
     public function handle(): int
     {
-        $this->info('🔥 Starting Ichimoku + RSI Analysis...');
-        $this->newLine();
-
         $symbol = $this->option('symbol');
         $interval = $this->option('interval');
         $limit = (int) $this->option('limit');
@@ -43,19 +40,12 @@ class IchimokuRsiCommand extends Command
         $telegramOnly = $this->option('telegram-only');
 
         if ($sendTelegram || $telegramOnly) {
-            $this->info('📱 Testing Telegram connection...');
             if (!$this->telegramService->testConnection()) {
-                $this->error('❌ Telegram connection failed!');
                 return Command::FAILURE;
             }
-            $this->info('✅ Telegram connection successful!');
-            $this->newLine();
         }
 
         $symbols = $symbol ? array_map('trim', explode(',', $symbol)) : config('crypto_symbols');
-
-        $this->info("📊 Analyzing " . count($symbols) . " symbols with Ichimoku+RSI strategy");
-        $this->newLine();
 
         $progressBar = $this->output->createProgressBar(count($symbols));
         $progressBar->start();
@@ -79,23 +69,17 @@ class IchimokuRsiCommand extends Command
 
         if ($sendTelegram || $telegramOnly) {
             if (!empty($this->analysisSignals)) {
-                $this->info('📱 Sending signals to instant signal bot...');
                 foreach ($this->analysisSignals as $symbol => $signals) {
                     foreach ($signals as $signal) {
-                        // 🔥 Отправляем только STRONG сигналы
                         if (in_array($signal['strength'], ['STRONG']) && CryptoSignal::shouldSendSignal($symbol, $signal['type'], $signal['strength'], 'Ichimoku+RSI', $signal['rsi'])) {
                             $this->telegramService->sendInstantSignal($signal, $symbol, 'Ichimoku+RSI');
                             $this->saveSignalToDatabase($signal, $symbol);
                             usleep(500000);
-                        } elseif ($signal['strength'] === 'WEAK') {
-                            $this->info("⏭️ Skipping WEAK signal for {$symbol}: {$signal['type']} ({$signal['strength']})");
                         }
                     }
                 }
-                $this->info('✅ Signals sent to instant bot!');
             } else {
                 $this->telegramService->sendNoSignalsMessage($totalSymbols, count($this->analysisErrors), $this->analysisErrors);
-                $this->info('✅ No signals message sent!');
             }
         }
 
@@ -190,10 +174,5 @@ class IchimokuRsiCommand extends Command
 
     private function displayResults(int $totalSymbols, int $totalSignals): void
     {
-        $this->info("📈 Ichimoku+RSI Analysis Complete!");
-        $this->info("Total symbols: {$totalSymbols}");
-        $this->info("Total signals: {$totalSignals}");
-        $this->info("Errors: " . count($this->analysisErrors));
-        $this->newLine();
     }
 }

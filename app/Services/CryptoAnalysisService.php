@@ -305,12 +305,18 @@ class CryptoAnalysisService
     /**
      * Analyze symbol with MTF strategy
      */
+    /**
+     * Analyze symbol with MTF (Multi-Timeframe) strategy
+     * Новая логика:
+     * - HTF (1h): только фильтр, не начисляет баллы
+     * - 15m: основная балльная система
+     * - 5m: триггер входа (+10 баллов максимум)
+     */
     public function analyzeMTF(string $symbol, array $params): array
     {
         $rsiPeriod = $params['rsi_period'] ?? 14;
         $emaPeriod = $params['ema_period'] ?? 50;
-        $rsiBuyThreshold = $params['rsi_buy_threshold'] ?? 30;
-        $rsiSellThreshold = $params['rsi_sell_threshold'] ?? 70;
+        $emaFastPeriod = $params['ema_fast_period'] ?? 20;
 
         // Fetch data for different timeframes
         $klines15m = $this->fetchKlines($symbol, '15m', 100);
@@ -321,107 +327,377 @@ class CryptoAnalysisService
             throw new \Exception("Недостаточно данных для анализа");
         }
 
-        // Calculate indicators
+        // Extract price data
         $closes15m = array_map(fn($k) => (float) $k[4], $klines15m);
-        $closes1h = array_map(fn($k) => (float) $k[4], $klines1h);
-        $closes5m = array_map(fn($k) => (float) $k[4], $klines5m);
+        $opens15m = array_map(fn($k) => (float) $k[1], $klines15m);
         $highs15m = array_map(fn($k) => (float) $k[2], $klines15m);
         $lows15m = array_map(fn($k) => (float) $k[3], $klines15m);
+        
+        $closes1h = array_map(fn($k) => (float) $k[4], $klines1h);
+        $closes5m = array_map(fn($k) => (float) $k[4], $klines5m);
+        $opens5m = array_map(fn($k) => (float) $k[1], $klines5m);
+        $highs5m = array_map(fn($k) => (float) $k[2], $klines5m);
+        $lows5m = array_map(fn($k) => (float) $k[3], $klines5m);
 
+        // Calculate indicators
+        $price = end($closes15m);
+        $price1h = end($closes1h);
+        
         $rsi15m = $this->calculateRSI($closes15m, $rsiPeriod);
         $rsi1h = $this->calculateRSI($closes1h, $rsiPeriod);
         $rsi5m = $this->calculateRSI($closes5m, $rsiPeriod);
-        $ema15m = $this->calculateEMA($closes15m, $emaPeriod);
-        $ema1h = $this->calculateEMA($closes1h, $emaPeriod);
+        
+        $ema50_15m = $this->calculateEMA($closes15m, $emaPeriod);
+        $ema20_15m = $this->calculateEMA($closes15m, $emaFastPeriod);
+        $ema50_1h = $this->calculateEMA($closes1h, $emaPeriod);
+        
+        $ema9_5m = $this->calculateEMA($closes5m, 9);
+        $ema21_5m = $this->calculateEMA($closes5m, 21);
+        
         $bb15m = $this->calculateBollingerBands($closes15m, $params['bb_period'] ?? 20, $params['bb_std_dev'] ?? 2);
         $atr = $this->calculateATR($highs15m, $lows15m, $closes15m, $params['atr_period'] ?? 14);
 
-        $price = end($closes15m);
+        // 🔑 ШАГ 1: HTF (1h) - ТОЛЬКО ФИЛЬТР (обязательный, не начисляет баллы)
+        $buyAllowed = ($price1h >= $ema50_1h) || ($rsi1h >= 45);
+        $sellAllowed = ($price1h <= $ema50_1h) || ($rsi1h <= 55);
 
-        // Calculate probabilities
+        // Если HTF блокирует оба направления - возвращаем HOLD
+        if (!$buyAllowed && !$sellAllowed) {
+            return [
+                'price' => $price,
+                'rsi' => round($rsi15m, 2),
+                'rsi_htf' => round($rsi1h, 2),
+                'rsi_ltf' => round($rsi5m, 2),
+                'ema' => round($ema50_15m, 2),
+                'ema_htf' => round($ema50_1h, 2),
+                'bb_upper' => round($bb15m['upper'], 2),
+                'bb_lower' => round($bb15m['lower'], 2),
+                'atr' => round($atr, 2),
+                'signal' => 'HOLD',
+                'long_probability' => 50,
+                'short_probability' => 50,
+                'stop_loss' => $price,
+                'take_profit' => $price,
+                'reason' => 'HTF (1h) блокирует оба направления',
+                'strength' => 'WEAK'
+            ];
+        }
+
+        // 🔑 ШАГ 2: Основная логика - 15m (балльная система)
         $longScore = 0;
         $shortScore = 0;
 
-        // RSI signals
-        if ($rsi15m <= $rsiBuyThreshold) {
-            $longScore += 30;
-        } elseif ($rsi15m >= $rsiSellThreshold) {
-            $shortScore += 30;
+        // BUY условия (15m)
+        if ($buyAllowed) {
+            // RSI(15m) ≤ 35
+            if ($rsi15m <= 35) {
+                $longScore += 25;
+            } elseif ($rsi15m > 35 && $rsi15m <= 45) {
+                $longScore += 15;
+            }
+
+            // Цена ≤ нижняя BB × 1.01
+            if ($price <= $bb15m['lower'] * 1.01) {
+                $longScore += 25;
+            }
+
+            // BB position ≤ 25%
+            $bbWidth = $bb15m['upper'] - $bb15m['lower'];
+            if ($bbWidth > 0) {
+                $bbPosition = (($price - $bb15m['lower']) / $bbWidth) * 100;
+                if ($bbPosition <= 25) {
+                    $longScore += 15;
+                }
+            }
+
+            // Цена выше EMA50(15m)
+            if ($price > $ema50_15m) {
+                $longScore += 15;
+            }
+
+            // EMA20 > EMA50
+            if ($ema20_15m > $ema50_15m) {
+                $longScore += 10;
+            }
+
+            // Bullish candle (engulfing или pin bar)
+            if ($this->isBullishCandle($opens15m, $highs15m, $lows15m, $closes15m)) {
+                $longScore += 10;
+            }
         }
 
-        // HTF trend
-        if ($price > $ema1h && $rsi1h > 50) {
-            $longScore += 20;
-        } elseif ($price < $ema1h && $rsi1h < 50) {
-            $shortScore += 20;
+        // SELL условия (15m) - зеркально
+        if ($sellAllowed) {
+            // RSI(15m) ≥ 65
+            if ($rsi15m >= 65) {
+                $shortScore += 25;
+            } elseif ($rsi15m >= 55 && $rsi15m < 65) {
+                $shortScore += 15;
+            }
+
+            // Цена ≥ верхняя BB × 0.99
+            if ($price >= $bb15m['upper'] * 0.99) {
+                $shortScore += 25;
+            }
+
+            // BB position ≥ 75%
+            $bbWidth = $bb15m['upper'] - $bb15m['lower'];
+            if ($bbWidth > 0) {
+                $bbPosition = (($price - $bb15m['lower']) / $bbWidth) * 100;
+                if ($bbPosition >= 75) {
+                    $shortScore += 15;
+                }
+            }
+
+            // Цена ниже EMA50(15m)
+            if ($price < $ema50_15m) {
+                $shortScore += 15;
+            }
+
+            // EMA20 < EMA50
+            if ($ema20_15m < $ema50_15m) {
+                $shortScore += 10;
+            }
+
+            // Bearish candle
+            if ($this->isBearishCandle($opens15m, $highs15m, $lows15m, $closes15m)) {
+                $shortScore += 10;
+            }
         }
 
-        // LTF confirmation
-        if ($rsi5m > 30 && $price > $ema15m) {
-            $longScore += 15;
-        } elseif ($rsi5m < 70 && $price < $ema15m) {
-            $shortScore += 15;
+        // 🔑 ШАГ 3: LTF (5m) - ТРИГГЕР, не фильтр (макс +10 баллов)
+        $ltfTrigger = false;
+        
+        // BUY триггеры (5m)
+        if ($buyAllowed && $longScore > 0) {
+            $prevRsi5m = count($closes5m) > 1 ? $this->calculateRSI(array_slice($closes5m, 0, -1), $rsiPeriod) : $rsi5m;
+            
+            // RSI(5m) пересёк 30 снизу
+            if ($prevRsi5m < 30 && $rsi5m >= 30) {
+                $longScore += 10;
+                $ltfTrigger = true;
+            }
+            // Bullish candle
+            elseif ($this->isBullishCandle($opens5m, $highs5m, $lows5m, $closes5m)) {
+                $longScore += 10;
+                $ltfTrigger = true;
+            }
+            // EMA9 > EMA21
+            elseif ($ema9_5m > $ema21_5m) {
+                $longScore += 10;
+                $ltfTrigger = true;
+            }
         }
 
-        // Bollinger Bands
-        if ($price <= $bb15m['lower']) {
-            $longScore += 20;
-        } elseif ($price >= $bb15m['upper']) {
-            $shortScore += 20;
+        // SELL триггеры (5m)
+        if ($sellAllowed && $shortScore > 0) {
+            $prevRsi5m = count($closes5m) > 1 ? $this->calculateRSI(array_slice($closes5m, 0, -1), $rsiPeriod) : $rsi5m;
+            
+            // RSI(5m) пересёк 70 сверху
+            if ($prevRsi5m > 70 && $rsi5m <= 70) {
+                $shortScore += 10;
+                $ltfTrigger = true;
+            }
+            // Bearish candle
+            elseif ($this->isBearishCandle($opens5m, $highs5m, $lows5m, $closes5m)) {
+                $shortScore += 10;
+                $ltfTrigger = true;
+            }
+            // EMA9 < EMA21
+            elseif ($ema9_5m < $ema21_5m) {
+                $shortScore += 10;
+                $ltfTrigger = true;
+            }
         }
 
-        // EMA trend
-        if ($price > $ema15m) {
-            $longScore += 15;
+        // 🔧 Volatility фильтр: ATR% < 0.35% → HOLD (уберет флет и снизит шум)
+        $atrPercent = $price > 0 ? (($atr / $price) * 100) : 0;
+        if ($atrPercent < 0.35) {
+            return [
+                'price' => $price,
+                'rsi' => round($rsi15m, 2),
+                'rsi_htf' => round($rsi1h, 2),
+                'rsi_ltf' => round($rsi5m, 2),
+                'ema' => round($ema50_15m, 2),
+                'ema_htf' => round($ema50_1h, 2),
+                'bb_upper' => round($bb15m['upper'], 2),
+                'bb_lower' => round($bb15m['lower'], 2),
+                'atr' => round($atr, 2),
+                'signal' => 'HOLD',
+                'long_probability' => 50,
+                'short_probability' => 50,
+                'stop_loss' => $price,
+                'take_profit' => $price,
+                'reason' => "Низкая волатильность: ATR% = " . number_format($atrPercent, 2) . "% (требуется ≥ 0.35%)",
+                'strength' => 'WEAK'
+            ];
+        }
+
+        // 🔑 ШАГ 4: Определение сигнала и силы
+        $winningScore = max($longScore, $shortScore);
+        $signal = 'HOLD';
+        $strength = 'WEAK';
+
+        // Проверяем обязательные условия для STRONG
+        $hasCandleConfirmation = false;
+        $hasEmaCross = false;
+        
+        if ($longScore > $shortScore) {
+            // BUY: проверяем bullish candle или EMA20 > EMA50
+            $hasCandleConfirmation = $this->isBullishCandle($opens15m, $highs15m, $lows15m, $closes15m);
+            $hasEmaCross = $ema20_15m > $ema50_15m;
         } else {
-            $shortScore += 15;
+            // SELL: проверяем bearish candle или EMA20 < EMA50
+            $hasCandleConfirmation = $this->isBearishCandle($opens15m, $highs15m, $lows15m, $closes15m);
+            $hasEmaCross = $ema20_15m < $ema50_15m;
+        }
+        
+        $hasStrongConfirmation = $hasCandleConfirmation || $hasEmaCross;
+
+        // Определяем силу сигнала
+        if ($winningScore >= 70 && $hasStrongConfirmation) {
+            // STRONG: минимум 70 баллов И обязательное подтверждение (свеча ИЛИ EMA cross)
+            $strength = 'STRONG';
+            $signal = $longScore > $shortScore ? 'BUY' : 'SELL';
+        } elseif ($winningScore >= 70) {
+            // 70+ баллов, но нет подтверждения → максимум MEDIUM
+            $strength = 'MEDIUM';
+            $signal = $longScore > $shortScore ? 'BUY' : 'SELL';
+        } elseif ($winningScore >= 55) {
+            $strength = 'MEDIUM';
+            $signal = $longScore > $shortScore ? 'BUY' : 'SELL';
+        } elseif ($winningScore >= 45) {
+            $strength = 'WEAK';
+            $signal = $longScore > $shortScore ? 'BUY' : 'SELL';
         }
 
-        // Normalize to percentages
-        $totalScore = $longScore + $shortScore;
-        $longProb = $totalScore > 0 ? round(($longScore / $totalScore) * 100) : 50;
-        $shortProb = $totalScore > 0 ? round(($shortScore / $totalScore) * 100) : 50;
-
-        // Determine signal
-        $signal = $longProb > $shortProb ? 'BUY' : 'SELL';
-        if (abs($longProb - $shortProb) < 5) {
+        // Проверяем, что HTF разрешает выбранное направление
+        if ($signal === 'BUY' && !$buyAllowed) {
             $signal = 'HOLD';
+            $strength = 'WEAK';
+        } elseif ($signal === 'SELL' && !$sellAllowed) {
+            $signal = 'HOLD';
+            $strength = 'WEAK';
+        }
+
+        // 🔑 ШАГ 5: Расчет SL/TP
+        $stopLossMultiplier = 2.0;
+        $takeProfitMultiplier = 2.5;
+
+        if ($signal === 'BUY') {
+            $stopLoss = min($price - ($atr * $stopLossMultiplier), $bb15m['lower'] * 0.98);
+            $takeProfit = $price + ($atr * $takeProfitMultiplier);
+        } elseif ($signal === 'SELL') {
+            $stopLoss = max($price + ($atr * $stopLossMultiplier), $bb15m['upper'] * 1.02);
+            $takeProfit = $price - ($atr * $takeProfitMultiplier);
+        } else {
+            $stopLoss = $price;
+            $takeProfit = $price;
         }
 
         // Generate reason
         $reasons = [];
-        if ($rsi15m <= $rsiBuyThreshold) {
-            $reasons[] = "RSI {$rsi15m} показывает перепроданность";
-        } elseif ($rsi15m >= $rsiSellThreshold) {
-            $reasons[] = "RSI {$rsi15m} показывает перекупленность";
-        }
-        if ($price > $ema1h) {
-            $reasons[] = "Цена выше EMA на старшем таймфрейме (бычий тренд)";
+        if ($signal === 'BUY') {
+            $reasons[] = "HTF (1h): разрешено (Цена ≥ EMA50 ИЛИ RSI ≥ 45)";
+            $reasons[] = "15m баллы: {$longScore}";
+            if ($ltfTrigger) {
+                $reasons[] = "5m триггер: подтвержден";
+            }
+        } elseif ($signal === 'SELL') {
+            $reasons[] = "HTF (1h): разрешено (Цена ≤ EMA50 ИЛИ RSI ≤ 55)";
+            $reasons[] = "15m баллы: {$shortScore}";
+            if ($ltfTrigger) {
+                $reasons[] = "5m триггер: подтвержден";
+            }
         } else {
-            $reasons[] = "Цена ниже EMA на старшем таймфрейме (медвежий тренд)";
+            $reasons[] = "Недостаточно баллов (нужно ≥ 45, получено: {$winningScore})";
         }
-        if ($price <= $bb15m['lower']) {
-            $reasons[] = "Цена у нижней границы Bollinger Bands";
-        } elseif ($price >= $bb15m['upper']) {
-            $reasons[] = "Цена у верхней границы Bollinger Bands";
-        }
+
+        // Normalize to percentages for compatibility
+        $totalScore = $longScore + $shortScore;
+        $longProb = $totalScore > 0 ? round(($longScore / $totalScore) * 100) : 50;
+        $shortProb = $totalScore > 0 ? round(($shortScore / $totalScore) * 100) : 50;
 
         return [
             'price' => $price,
             'rsi' => round($rsi15m, 2),
             'rsi_htf' => round($rsi1h, 2),
             'rsi_ltf' => round($rsi5m, 2),
-            'ema' => round($ema15m, 2),
-            'ema_htf' => round($ema1h, 2),
+            'ema' => round($ema50_15m, 2),
+            'ema_htf' => round($ema50_1h, 2),
             'bb_upper' => round($bb15m['upper'], 2),
             'bb_lower' => round($bb15m['lower'], 2),
             'atr' => round($atr, 2),
             'signal' => $signal,
             'long_probability' => $longProb,
             'short_probability' => $shortProb,
+            'stop_loss' => $stopLoss,
+            'take_profit' => $takeProfit,
             'reason' => implode('. ', $reasons),
-            'strength' => abs($longProb - $shortProb) > 20 ? 'STRONG' : (abs($longProb - $shortProb) > 10 ? 'MEDIUM' : 'WEAK')
+            'strength' => $strength
         ];
+    }
+
+    /**
+     * Проверяет бычью свечу (engulfing или pin bar)
+     */
+    private function isBullishCandle(array $opens, array $highs, array $lows, array $closes): bool
+    {
+        $count = count($closes);
+        if ($count < 2) {
+            return false;
+        }
+
+        $lastOpen = $opens[$count - 1];
+        $lastClose = $closes[$count - 1];
+        $lastHigh = $highs[$count - 1];
+        $lastLow = $lows[$count - 1];
+        $prevOpen = $opens[$count - 2];
+        $prevClose = $closes[$count - 2];
+
+        // Бычья свеча: закрытие > открытие
+        $isBullish = $lastClose > $lastOpen;
+        
+        // Engulfing: текущая свеча поглощает предыдущую
+        $isEngulfing = $isBullish && $lastOpen < $prevClose && $lastClose > $prevOpen;
+        
+        // Pin bar: длинная нижняя тень (минимум 2/3 от диапазона)
+        $candleRange = $lastHigh - $lastLow;
+        $lowerShadow = min($lastOpen, $lastClose) - $lastLow;
+        $isPinBar = $candleRange > 0 && ($lowerShadow / $candleRange) >= 0.67;
+
+        return $isBullish && ($isEngulfing || $isPinBar);
+    }
+
+    /**
+     * Проверяет медвежью свечу (engulfing или pin bar)
+     */
+    private function isBearishCandle(array $opens, array $highs, array $lows, array $closes): bool
+    {
+        $count = count($closes);
+        if ($count < 2) {
+            return false;
+        }
+
+        $lastOpen = $opens[$count - 1];
+        $lastClose = $closes[$count - 1];
+        $lastHigh = $highs[$count - 1];
+        $lastLow = $lows[$count - 1];
+        $prevOpen = $opens[$count - 2];
+        $prevClose = $closes[$count - 2];
+
+        // Медвежья свеча: закрытие < открытие
+        $isBearish = $lastClose < $lastOpen;
+        
+        // Engulfing: текущая свеча поглощает предыдущую
+        $isEngulfing = $isBearish && $lastOpen > $prevClose && $lastClose < $prevOpen;
+        
+        // Pin bar: длинная верхняя тень (минимум 2/3 от диапазона)
+        $candleRange = $lastHigh - $lastLow;
+        $upperShadow = $lastHigh - max($lastOpen, $lastClose);
+        $isPinBar = $candleRange > 0 && ($upperShadow / $candleRange) >= 0.67;
+
+        return $isBearish && ($isEngulfing || $isPinBar);
     }
 
     /**
@@ -714,34 +990,61 @@ class CryptoAnalysisService
 
     /**
      * Calculate Stochastic Oscillator
+     * Улучшенная версия: правильно рассчитывает D (сглаженный K)
      */
     public function calculateStochastic(array $highs, array $lows, array $closes, int $kPeriod = 14, int $kSmooth = 3, int $dPeriod = 3): array
     {
-        if (count($closes) < $kPeriod) {
+        if (count($closes) < $kPeriod + $kSmooth) {
             return ['k' => 50.0, 'd' => 50.0];
         }
 
-        // Calculate %K
-        $recentHighs = array_slice($highs, -$kPeriod);
-        $recentLows = array_slice($lows, -$kPeriod);
-        $currentClose = end($closes);
-        
-        $highest = max($recentHighs);
-        $lowest = min($recentLows);
-        
-        $k = 50.0;
-        if ($highest != $lowest) {
-            $k = (($currentClose - $lowest) / ($highest - $lowest)) * 100;
+        // Calculate raw %K values for all periods
+        $rawK = [];
+        for ($i = $kPeriod - 1; $i < count($closes); $i++) {
+            $periodHighs = array_slice($highs, $i - $kPeriod + 1, $kPeriod);
+            $periodLows = array_slice($lows, $i - $kPeriod + 1, $kPeriod);
+            $currentClose = $closes[$i];
+            
+            $highest = max($periodHighs);
+            $lowest = min($periodLows);
+            
+            if ($highest != $lowest) {
+                $rawK[] = (($currentClose - $lowest) / ($highest - $lowest)) * 100;
+            } else {
+                $rawK[] = 50.0;
+            }
         }
 
-        // For simplicity, using K as D (in real implementation would smooth K and then calculate D)
-        $d = $k;
+        // Smooth %K (SMA of raw K)
+        $smoothedK = [];
+        for ($i = $kSmooth - 1; $i < count($rawK); $i++) {
+            $smoothPeriod = array_slice($rawK, $i - $kSmooth + 1, $kSmooth);
+            $smoothedK[] = array_sum($smoothPeriod) / $kSmooth;
+        }
+
+        // Current %K (last smoothed value)
+        $k = end($smoothedK);
+
+        // Calculate %D (SMA of smoothed K)
+        if (count($smoothedK) >= $dPeriod) {
+            $dPeriodValues = array_slice($smoothedK, -$dPeriod);
+            $d = array_sum($dPeriodValues) / $dPeriod;
+        } else {
+            $d = $k; // Fallback if not enough data
+        }
 
         return ['k' => $k, 'd' => $d];
     }
 
     /**
-     * Analyze symbol with EMA+Stochastic strategy
+     * Analyze symbol with EMA+Stochastic strategy (Scalping)
+     * Новая "боевая" логика:
+     * - Блок 1: Направление (EMA9 >/< EMA21) - обязательный
+     * - Блок 2: Тайминг (K пересекает D) - только момент пересечения
+     * - Блок 3: Зона Stochastic (K в диапазоне)
+     * - Сила на основе |K - D|: STRONG ≥ 7, MEDIUM 3-6, WEAK < 3 (не торгуем)
+     * - ATR-фильтр: ATR(14) > SMA(ATR, 20)
+     * - Защита от флет-пилы: |EMA9 - EMA21| ≥ 0.1 × ATR
      */
     public function analyzeEmaStochastic(string $symbol, array $params): array
     {
@@ -769,69 +1072,165 @@ class CryptoAnalysisService
         $price = end($closes);
         $ema9 = $this->calculateEMA($closes, $emaFast);
         $ema21 = $this->calculateEMA($closes, $emaSlow);
-        $stochastic = $this->calculateStochastic($highs, $lows, $closes, $stochKPeriod, $stochKSmooth, $stochDPeriod);
         $atr = $this->calculateATR($highs, $lows, $closes, $params['atr_period'] ?? 14);
-
+        
+        // Calculate Stochastic (нужны предыдущие значения для определения пересечения)
+        $stochastic = $this->calculateStochastic($highs, $lows, $closes, $stochKPeriod, $stochKSmooth, $stochDPeriod);
         $k = $stochastic['k'];
         $d = $stochastic['d'];
+        
+        // Получаем предыдущие значения K и D для определения пересечения
+        $prevCloses = array_slice($closes, 0, -1);
+        $prevHighs = array_slice($highs, 0, -1);
+        $prevLows = array_slice($lows, 0, -1);
+        $prevStochastic = count($prevCloses) >= $stochKPeriod ? 
+            $this->calculateStochastic($prevHighs, $prevLows, $prevCloses, $stochKPeriod, $stochKSmooth, $stochDPeriod) : 
+            ['k' => $k, 'd' => $d];
+        $prevK = $prevStochastic['k'];
+        $prevD = $prevStochastic['d'];
 
-        // Calculate probabilities
-        $longScore = 0;
-        $shortScore = 0;
+        // 🔧 ФИЛЬТР 1: ATR-фильтр (ATR(14) > SMA(ATR, 20))
+        // Рассчитываем SMA(ATR, 20) - нужны предыдущие ATR значения
+        $atrValues = [];
+        for ($i = 14; $i < count($closes); $i++) {
+            $sliceCloses = array_slice($closes, 0, $i + 1);
+            $sliceHighs = array_slice($highs, 0, $i + 1);
+            $sliceLows = array_slice($lows, 0, $i + 1);
+            $atrValues[] = $this->calculateATR($sliceHighs, $sliceLows, $sliceCloses, 14);
+        }
+        $smaAtr = count($atrValues) >= 20 ? array_sum(array_slice($atrValues, -20)) / 20 : $atr;
+        
+        if ($atr <= $smaAtr) {
+            return [
+                'price' => $price,
+                'rsi' => 50.0,
+                'ema_fast' => $ema9,
+                'ema_slow' => $ema21,
+                'stochastic_k' => $k,
+                'stochastic_d' => $d,
+                'atr' => $atr,
+                'signal' => 'HOLD',
+                'long_probability' => 50,
+                'short_probability' => 50,
+                'stop_loss' => $price,
+                'take_profit' => $price,
+                'reason' => "Нет волатильности: ATR({$atr}) ≤ SMA(ATR,20)(" . number_format($smaAtr, 4) . ")",
+                'strength' => 'WEAK'
+            ];
+        }
 
-        // BUY conditions: EMA9 > EMA21 + Stochastic exits from oversold
-        if ($ema9 > $ema21 && $k > 20 && $k < 50 && $k > $d) {
-            $longScore += 40;
-            if ($k > $d && ($k - $d) > 5) {
-                $longScore += 30; // Strong momentum
-            } elseif ($k > $d) {
-                $longScore += 15; // Medium momentum
+        // 🔧 ФИЛЬТР 2: Защита от флет-пилы (|EMA9 - EMA21| ≥ 0.1 × ATR)
+        $emaDistance = abs($ema9 - $ema21);
+        $minEmaDistance = $atr * 0.1;
+        
+        if ($emaDistance < $minEmaDistance) {
+            return [
+                'price' => $price,
+                'rsi' => 50.0,
+                'ema_fast' => $ema9,
+                'ema_slow' => $ema21,
+                'stochastic_k' => $k,
+                'stochastic_d' => $d,
+                'atr' => $atr,
+                'signal' => 'HOLD',
+                'long_probability' => 50,
+                'short_probability' => 50,
+                'stop_loss' => $price,
+                'take_profit' => $price,
+                'reason' => "Флет-пила: |EMA9 - EMA21| = " . number_format($emaDistance, 4) . " < 0.1×ATR = " . number_format($minEmaDistance, 4),
+                'strength' => 'WEAK'
+            ];
+        }
+
+        // 🔑 БЛОК 1: НАПРАВЛЕНИЕ (обязательный)
+        $buyDirection = $ema9 > $ema21;
+        $sellDirection = $ema9 < $ema21;
+        
+        if (!$buyDirection && !$sellDirection) {
+            return [
+                'price' => $price,
+                'rsi' => 50.0,
+                'ema_fast' => $ema9,
+                'ema_slow' => $ema21,
+                'stochastic_k' => $k,
+                'stochastic_d' => $d,
+                'atr' => $atr,
+                'signal' => 'HOLD',
+                'long_probability' => 50,
+                'short_probability' => 50,
+                'stop_loss' => $price,
+                'take_profit' => $price,
+                'reason' => "Нет направления: EMA9 = EMA21",
+                'strength' => 'WEAK'
+            ];
+        }
+
+        // 🔑 БЛОК 2: ТАЙМИНГ (K пересекает D - только момент пересечения)
+        $kCrossesDUp = ($prevK <= $prevD) && ($k > $d); // K пересекает D снизу
+        $kCrossesDDown = ($prevK >= $prevD) && ($k < $d); // K пересекает D сверху
+
+        // 🔑 БЛОК 3: ЗОНА STOCHASTIC
+        $kInBuyZone = $k >= 20 && $k <= 50;
+        $kInSellZone = $k >= 50 && $k <= 80;
+        
+        // Проверяем, что НЕ входим в неправильные зоны
+        $buyBlocked = $k > 60; // BUY при K > 60 - не входить
+        $sellBlocked = $k < 40; // SELL при K < 40 - не входить
+
+        // Определяем сигнал
+        $signal = 'HOLD';
+        $strength = 'WEAK';
+        $delta = abs($k - $d);
+
+        // BUY условия
+        if ($buyDirection && $kCrossesDUp && $kInBuyZone && !$buyBlocked) {
+            // Определяем силу на основе |K - D|
+            if ($delta >= 7) {
+                $strength = 'STRONG';
+                $signal = 'BUY';
+            } elseif ($delta >= 3) {
+                $strength = 'MEDIUM';
+                $signal = 'BUY';
             }
-        } elseif ($ema9 > $ema21) {
-            $longScore += 20; // Trend alignment
+            // WEAK (< 3) - не торгуем
         }
 
-        // SELL conditions: EMA9 < EMA21 + Stochastic exits from overbought
-        if ($ema9 < $ema21 && $k < 80 && $k > 50 && $k < $d) {
-            $shortScore += 40;
-            if ($k < $d && ($d - $k) > 5) {
-                $shortScore += 30; // Strong momentum
-            } elseif ($k < $d) {
-                $shortScore += 15; // Medium momentum
+        // SELL условия
+        if ($sellDirection && $kCrossesDDown && $kInSellZone && !$sellBlocked) {
+            // Определяем силу на основе |K - D|
+            if ($delta >= 7) {
+                $strength = 'STRONG';
+                $signal = 'SELL';
+            } elseif ($delta >= 3) {
+                $strength = 'MEDIUM';
+                $signal = 'SELL';
             }
-        } elseif ($ema9 < $ema21) {
-            $shortScore += 20; // Trend alignment
+            // WEAK (< 3) - не торгуем
         }
 
-        // Stochastic signals
-        if ($k <= 20 && $k > $d) {
-            $longScore += 20; // Oversold with bullish cross
-        } elseif ($k >= 80 && $k < $d) {
-            $shortScore += 20; // Overbought with bearish cross
-        } elseif ($k > 20 && $k < 50 && $k > $d) {
-            $longScore += 10; // Bullish momentum
-        } elseif ($k > 50 && $k < 80 && $k < $d) {
-            $shortScore += 10; // Bearish momentum
+        // Если WEAK - не торгуем
+        if ($strength === 'WEAK') {
+            return [
+                'price' => $price,
+                'rsi' => 50.0,
+                'ema_fast' => $ema9,
+                'ema_slow' => $ema21,
+                'stochastic_k' => $k,
+                'stochastic_d' => $d,
+                'atr' => $atr,
+                'signal' => 'HOLD',
+                'long_probability' => 50,
+                'short_probability' => 50,
+                'stop_loss' => $price,
+                'take_profit' => $price,
+                'reason' => "Слабый импульс: |K - D| = " . number_format($delta, 2) . " < 3 (требуется ≥ 3)",
+                'strength' => 'WEAK'
+            ];
         }
 
-        // Normalize to percentages
-        $totalScore = $longScore + $shortScore;
-        $longProb = $totalScore > 0 ? round(($longScore / $totalScore) * 100) : 50;
-        $shortProb = $totalScore > 0 ? round(($shortScore / $totalScore) * 100) : 50;
-
-        // Determine signal
-        $signal = $longProb > $shortProb ? 'BUY' : 'SELL';
-        if (abs($longProb - $shortProb) < 5) {
-            $signal = 'HOLD';
-        }
-
-        // Calculate SL/TP (scalping strategy - tighter stops)
-        $stopLossMultiplier = $params['stop_loss_multiplier'] ?? 1.5;
-        $takeProfitMultiplier = $params['take_profit_multiplier'] ?? 1.8;
-
-        // Determine strength for multiplier adjustment
-        $strength = abs($longProb - $shortProb) > 20 ? 'STRONG' : (abs($longProb - $shortProb) > 10 ? 'MEDIUM' : 'WEAK');
-        $tpMultiplier = match($strength) {
+        // 🔧 РИСК-МЕНЕДЖМЕНТ: SL всегда ATR × 1.5, TP зависит от силы
+        $stopLossMultiplier = 1.5; // Всегда
+        $takeProfitMultiplier = match($strength) {
             'STRONG' => 2.4,
             'MEDIUM' => 1.8,
             default => 1.2
@@ -839,24 +1238,27 @@ class CryptoAnalysisService
 
         if ($signal === 'BUY') {
             $stopLoss = $price - ($atr * $stopLossMultiplier);
-            $takeProfit = $price + ($atr * $tpMultiplier);
+            $takeProfit = $price + ($atr * $takeProfitMultiplier);
         } elseif ($signal === 'SELL') {
             $stopLoss = $price + ($atr * $stopLossMultiplier);
-            $takeProfit = $price - ($atr * $tpMultiplier);
+            $takeProfit = $price - ($atr * $takeProfitMultiplier);
         } else {
             $stopLoss = $price;
             $takeProfit = $price;
         }
 
         // Generate reason
-        $emaTrend = $ema9 > $ema21 ? 'Bullish' : 'Bearish';
-        $stochCross = $k > $d ? 'K>D' : 'K<D';
         $reasons = [];
-        $reasons[] = "EMA{$emaFast} vs EMA{$emaSlow}: {$emaTrend} trend";
-        $reasons[] = "Stochastic {$stochCross} | K: " . number_format($k, 1) . " | D: " . number_format($d, 1);
-        if ($signal !== 'HOLD') {
-            $reasons[] = "Price " . ($signal === 'BUY' ? 'above' : 'below') . " EMA{$emaFast}";
-        }
+        $reasons[] = "Направление: EMA{$emaFast} " . ($buyDirection ? '>' : '<') . " EMA{$emaSlow}";
+        $reasons[] = "Тайминг: K пересек D " . ($kCrossesDUp ? 'снизу' : 'сверху');
+        $reasons[] = "Зона Stochastic: K = " . number_format($k, 1) . " (BUY: [20-50], SELL: [50-80])";
+        $reasons[] = "Импульс: |K - D| = " . number_format($delta, 2) . " ({$strength})";
+        $reasons[] = "ATR фильтр: OK (ATR > SMA)";
+        $reasons[] = "Защита от флета: OK (|EMA9 - EMA21| ≥ 0.1×ATR)";
+
+        // Normalize to percentages for compatibility
+        $longProb = $signal === 'BUY' ? 100 : 0;
+        $shortProb = $signal === 'SELL' ? 100 : 0;
 
         // Return exact values (no rounding) - database supports decimal(20, 10)
         return [
@@ -1371,168 +1773,179 @@ class CryptoAnalysisService
 
     /**
      * Analyze symbol with Ichimoku+RSI strategy
+     * Новая рабочая логика (без баллов, только условия):
+     * - Четкая логика входа без конфликтов
+     * - Chikou Span проверка
+     * - ATR для расстояния от облака
+     * - Фильтр плоского облака
+     * - SL/TP на основе уровней Ichimoku
      */
     public function analyzeIchimokuRsi(string $symbol, array $params): array
     {
         $rsiPeriod = $params['rsi_period'] ?? 14;
-        $rsiBuyMin = $params['rsi_buy_min'] ?? 40;
-        $rsiBuyMax = $params['rsi_buy_max'] ?? 70;
-        $rsiSellMin = $params['rsi_sell_min'] ?? 30;
-        $rsiSellMax = $params['rsi_sell_max'] ?? 60;
         $tenkanPeriod = $params['tenkan_period'] ?? 9;
         $kijunPeriod = $params['kijun_period'] ?? 26;
         $senkouBPeriod = $params['senkou_b_period'] ?? 52;
         $interval = $params['interval'] ?? '1h';
         $limit = $params['limit'] ?? 100;
 
-        // Fetch klines data
         $klines = $this->fetchKlines($symbol, $interval, $limit);
 
-        if (empty($klines) || count($klines) < $senkouBPeriod) {
-            throw new \Exception("Недостаточно данных для анализа (требуется минимум {$senkouBPeriod} свечей)");
+        if (empty($klines) || count($klines) < $senkouBPeriod + 26) {
+            throw new \Exception("Недостаточно данных для анализа (требуется минимум " . ($senkouBPeriod + 26) . " свечей)");
         }
 
-        // Extract price data
         $closes = array_map(fn($k) => (float) $k[4], $klines);
         $highs = array_map(fn($k) => (float) $k[2], $klines);
         $lows = array_map(fn($k) => (float) $k[3], $klines);
 
-        // Calculate indicators
         $price = end($closes);
         $ichimoku = $this->calculateIchimoku($highs, $lows, $closes, $tenkanPeriod, $kijunPeriod, $senkouBPeriod);
         $rsi = $this->calculateRSI($closes, $rsiPeriod);
         $atr = $this->calculateATR($highs, $lows, $closes, $params['atr_period'] ?? 14);
 
-        // Calculate probabilities
-        $longScore = 0;
-        $shortScore = 0;
-
         $tenkan = $ichimoku['tenkan'];
         $kijun = $ichimoku['kijun'];
+        $senkouA = $ichimoku['senkou_a'];
+        $senkouB = $ichimoku['senkou_b'];
+        $chikou = $ichimoku['chikou'];
         $cloudTop = $ichimoku['cloud_top'];
         $cloudBottom = $ichimoku['cloud_bottom'];
         $priceAboveCloud = $ichimoku['price_above_cloud'];
 
-        // BUY conditions: Price above cloud + Tenkan > Kijun + RSI 40-70
-        if ($priceAboveCloud) {
-            $longScore += 30;
-            
-            if ($tenkan > $kijun) {
-                $longScore += 25; // Bullish crossover
-            }
-            
-            if ($rsi >= $rsiBuyMin && $rsi <= $rsiBuyMax) {
-                $longScore += 30; // RSI in buy zone
-            } elseif ($rsi > $rsiBuyMax) {
-                $longScore += 10; // RSI slightly overbought but still valid
-            }
-            
-            // Distance from cloud
-            $cloudDistance = (($price - $cloudTop) / $cloudTop) * 100;
-            if ($cloudDistance > 0 && $cloudDistance < 5) {
-                $longScore += 15; // Price just above cloud (good entry)
-            }
-        } else {
-            $shortScore += 10; // Price below cloud
+        $count = count($closes);
+        $price26PeriodsAgo = $count >= 26 ? $closes[$count - 26] : $price;
+
+        $cloudThickness = abs($senkouA - $senkouB);
+        $minCloudThickness = $atr * 0.5;
+
+        if ($cloudThickness < $minCloudThickness) {
+            return [
+                'price' => $price,
+                'rsi' => $rsi,
+                'tenkan' => $tenkan,
+                'kijun' => $kijun,
+                'senkou_a' => $senkouA,
+                'senkou_b' => $senkouB,
+                'chikou' => $chikou,
+                'cloud_top' => $cloudTop,
+                'cloud_bottom' => $cloudBottom,
+                'price_above_cloud' => $priceAboveCloud,
+                'atr' => $atr,
+                'signal' => 'HOLD',
+                'long_probability' => 50,
+                'short_probability' => 50,
+                'stop_loss' => $price,
+                'take_profit' => $price,
+                'reason' => "Плоское облако: |Senkou A - Senkou B| = " . number_format($cloudThickness, 4) . " < 0.5×ATR = " . number_format($minCloudThickness, 4),
+                'strength' => 'WEAK'
+            ];
         }
 
-        // SELL conditions: Price below cloud + Tenkan < Kijun + RSI 30-60
-        if (!$priceAboveCloud) {
-            $shortScore += 30;
-            
-            if ($tenkan < $kijun) {
-                $shortScore += 25; // Bearish crossover
-            }
-            
-            if ($rsi >= $rsiSellMin && $rsi <= $rsiSellMax) {
-                $shortScore += 30; // RSI in sell zone
-            } elseif ($rsi < $rsiSellMin) {
-                $shortScore += 10; // RSI slightly oversold but still valid
-            }
-            
-            // Distance from cloud
-            $cloudDistance = (($cloudBottom - $price) / $cloudBottom) * 100;
-            if ($cloudDistance > 0 && $cloudDistance < 5) {
-                $shortScore += 15; // Price just below cloud (good entry)
-            }
-        } else {
-            $longScore += 10; // Price above cloud
-        }
+        $distanceFromCloud = $priceAboveCloud ? ($price - $cloudTop) : ($cloudBottom - $price);
+        $maxDistance = $atr * 1.0;
+        $tooFarFromCloud = $distanceFromCloud > ($atr * 1.5);
 
-        // Tenkan/Kijun relationship
-        if ($tenkan > $kijun) {
-            $longScore += 10;
-        } elseif ($tenkan < $kijun) {
-            $shortScore += 10;
-        }
-
-        // RSI additional signals
-        if ($rsi > 70 && $priceAboveCloud) {
-            $longScore -= 10; // Overbought, reduce long score
-        } elseif ($rsi < 30 && !$priceAboveCloud) {
-            $shortScore -= 10; // Oversold, reduce short score
-        }
-
-        // Normalize to percentages
-        $totalScore = max(1, $longScore + $shortScore); // Prevent division by zero
-        $longProb = round(($longScore / $totalScore) * 100);
-        $shortProb = round(($shortScore / $totalScore) * 100);
-
-        // Determine signal
-        $signal = $longProb > $shortProb ? 'BUY' : 'SELL';
-        if (abs($longProb - $shortProb) < 5) {
-            $signal = 'HOLD';
-        }
-
-        // Calculate SL/TP based on original price (no rounding for database)
-        $stopLossMultiplier = $params['stop_loss_multiplier'] ?? 2.3;
-        $takeProfitMultiplier = $params['take_profit_multiplier'] ?? 2.0;
-
-        if ($signal === 'BUY') {
-            $stopLoss = $price - ($atr * $stopLossMultiplier);
-            $takeProfit = $price + ($atr * $takeProfitMultiplier);
-        } elseif ($signal === 'SELL') {
-            $stopLoss = $price + ($atr * $stopLossMultiplier);
-            $takeProfit = $price - ($atr * $takeProfitMultiplier);
-        } else {
-            $stopLoss = $price;
-            $takeProfit = $price;
-        }
-
-        // Determine precision for display only (not for database)
-        $precision = $this->getPricePrecision($price);
-
-        // Generate reason
+        $signal = 'HOLD';
+        $strength = 'WEAK';
         $reasons = [];
-        $reasons[] = "Цена " . ($priceAboveCloud ? 'выше' : 'ниже') . " облака Ишимоку";
-        $reasons[] = "Tenkan " . ($tenkan > $kijun ? '>' : '<') . " Kijun";
-        $reasons[] = "RSI: {$rsi}";
-        if ($signal === 'BUY') {
-            $reasons[] = "RSI в зоне покупки ({$rsiBuyMin}-{$rsiBuyMax})";
-        } elseif ($signal === 'SELL') {
-            $reasons[] = "RSI в зоне продажи ({$rsiSellMin}-{$rsiSellMax})";
+
+        if ($priceAboveCloud) {
+            $tenkanAboveKijun = $tenkan > $kijun;
+            $chikouAbovePrice26 = $chikou > $price26PeriodsAgo;
+            $rsiInBuyZone = $rsi >= 45 && $rsi <= 65;
+            $rsiTooHigh = $rsi > 70;
+            $priceNearCloud = $distanceFromCloud <= $maxDistance;
+
+            if ($tenkanAboveKijun && $chikouAbovePrice26 && $rsiInBuyZone && $priceNearCloud && !$rsiTooHigh && !$tooFarFromCloud) {
+                $signal = 'BUY';
+                $strength = 'STRONG';
+                $reasons[] = "Цена выше облака";
+                $reasons[] = "Tenkan > Kijun";
+                $reasons[] = "Chikou > цена(-26)";
+                $reasons[] = "RSI в зоне 45-65";
+                $reasons[] = "Расстояние от облака ≤ 1×ATR";
+            } elseif ($rsiTooHigh) {
+                $reasons[] = "RSI слишком высокий ({$rsi} > 70)";
+            } elseif ($tooFarFromCloud) {
+                $reasons[] = "Цена слишком далеко от облака (> 1.5×ATR)";
+            } elseif (!$tenkanAboveKijun) {
+                $reasons[] = "Tenkan ≤ Kijun";
+            } elseif (!$chikouAbovePrice26) {
+                $reasons[] = "Chikou ≤ цена(-26)";
+            } elseif (!$rsiInBuyZone) {
+                $reasons[] = "RSI вне зоны ({$rsi}, требуется 45-65)";
+            } elseif (!$priceNearCloud) {
+                $reasons[] = "Расстояние от облака > 1×ATR";
+            }
+        } else {
+            $tenkanBelowKijun = $tenkan < $kijun;
+            $chikouBelowPrice26 = $chikou < $price26PeriodsAgo;
+            $rsiInSellZone = $rsi >= 35 && $rsi <= 55;
+            $rsiTooLow = $rsi < 30;
+            $priceNearCloud = $distanceFromCloud <= $maxDistance;
+
+            if ($tenkanBelowKijun && $chikouBelowPrice26 && $rsiInSellZone && $priceNearCloud && !$rsiTooLow && !$tooFarFromCloud) {
+                $signal = 'SELL';
+                $strength = 'STRONG';
+                $reasons[] = "Цена ниже облака";
+                $reasons[] = "Tenkan < Kijun";
+                $reasons[] = "Chikou < цена(-26)";
+                $reasons[] = "RSI в зоне 35-55";
+                $reasons[] = "Расстояние от облака ≤ 1×ATR";
+            } elseif ($rsiTooLow) {
+                $reasons[] = "RSI слишком низкий ({$rsi} < 30)";
+            } elseif ($tooFarFromCloud) {
+                $reasons[] = "Цена слишком далеко от облака (> 1.5×ATR)";
+            } elseif (!$tenkanBelowKijun) {
+                $reasons[] = "Tenkan ≥ Kijun";
+            } elseif (!$chikouBelowPrice26) {
+                $reasons[] = "Chikou ≥ цена(-26)";
+            } elseif (!$rsiInSellZone) {
+                $reasons[] = "RSI вне зоны ({$rsi}, требуется 35-55)";
+            } elseif (!$priceNearCloud) {
+                $reasons[] = "Расстояние от облака > 1×ATR";
+            }
         }
 
-        // Return exact values (no rounding) - database supports decimal(20, 10)
-        // Price, stop_loss, take_profit will be saved exactly as calculated
+        if ($signal === 'HOLD' && empty($reasons)) {
+            $reasons[] = "Не выполнены условия для входа";
+        }
+
+        $stopLoss = $price;
+        $takeProfit = $price;
+
+        if ($signal === 'BUY') {
+            $slBelowKijun = min($kijun, $senkouB);
+            $stopLoss = $slBelowKijun;
+            $risk = $price - $stopLoss;
+            $takeProfit = $price + ($risk * 2.0);
+        } elseif ($signal === 'SELL') {
+            $slAboveKijun = max($kijun, $senkouB);
+            $stopLoss = $slAboveKijun;
+            $risk = $stopLoss - $price;
+            $takeProfit = $price - ($risk * 2.0);
+        }
+
         return [
-            'price' => $price, // Exact price from provider, no rounding
+            'price' => $price,
             'rsi' => $rsi,
             'tenkan' => $tenkan,
             'kijun' => $kijun,
-            'senkou_a' => $ichimoku['senkou_a'],
-            'senkou_b' => $ichimoku['senkou_b'],
+            'senkou_a' => $senkouA,
+            'senkou_b' => $senkouB,
+            'chikou' => $chikou,
             'cloud_top' => $cloudTop,
             'cloud_bottom' => $cloudBottom,
             'price_above_cloud' => $priceAboveCloud,
             'atr' => $atr,
             'signal' => $signal,
-            'long_probability' => $longProb,
-            'short_probability' => $shortProb,
-            'stop_loss' => $stopLoss, // Exact value, no rounding
-            'take_profit' => $takeProfit, // Exact value, no rounding
+            'long_probability' => $signal === 'BUY' ? 100 : ($signal === 'SELL' ? 0 : 50),
+            'short_probability' => $signal === 'SELL' ? 100 : ($signal === 'BUY' ? 0 : 50),
+            'stop_loss' => $stopLoss,
+            'take_profit' => $takeProfit,
             'reason' => implode('. ', $reasons),
-            'strength' => abs($longProb - $shortProb) > 20 ? 'STRONG' : (abs($longProb - $shortProb) > 10 ? 'MEDIUM' : 'WEAK')
+            'strength' => $strength
         ];
     }
 

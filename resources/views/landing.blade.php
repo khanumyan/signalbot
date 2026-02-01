@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>Traiding Helper Pro - Автоматизированные торговые сигналы</title>
+    <title>Trading Helper Pro - Автоматизированные торговые сигналы</title>
     <style>
         * {
             margin: 0;
@@ -328,6 +328,7 @@
             transform: translateY(-4px);
             border-color: rgba(168, 85, 247, 0.6);
             box-shadow: 0 8px 24px rgba(168, 85, 247, 0.2);
+            cursor: pointer;
         }
 
         .strategy-icon {
@@ -396,8 +397,8 @@
     <header class="header">
         <div class="header-content">
             <a href="/" class="logo">
-                <img src="{{ asset('images/Traiding (2).svg') }}" alt="Traiding Helper Pro Logo" onerror="this.style.display='none';">
-                <span class="logo-text">Traiding Helper Pro</span>
+                <img src="{{ asset('images/Traiding (2).svg') }}" alt="Trading Helper Pro Logo" onerror="this.style.display='none';">
+                <span class="logo-text">Trading Helper Pro</span>
             </a>
             <div class="header-actions">
                 <a href="{{ route('login') }}" class="btn btn-outline">Войти</a>
@@ -482,7 +483,7 @@
             
             <div class="about-text">
                 <p>
-                    Traiding Helper Pro — это автоматизированная система анализа криптовалютного рынка, 
+                    Trading Helper Pro — это автоматизированная система анализа криптовалютного рынка, 
                     которая использует передовые алгоритмы технического анализа для генерации торговых сигналов.
                 </p>
                 <p>
@@ -498,6 +499,13 @@
                 <li>Позволяет настраивать параметры стратегий под ваши предпочтения</li>
                 <li>Отслеживает историю всех сигналов для анализа эффективности</li>
             </ul>
+            
+            <div class="about-text" style="margin-top: 40px; padding: 24px; background: rgba(168, 85, 247, 0.1); border-left: 4px solid #a855f7; border-radius: 8px;">
+                <p style="font-size: 18px; line-height: 1.8;">
+                    <strong>Наша автоматизированная система каждую минуту анализирует рынок и генерирует сигналы с использованием этих стратегий.</strong> 
+                    Для понимания стратегий и их логики работы читайте <a href="#strategies" style="color: #a855f7; text-decoration: underline;">раздел "Торговые стратегии" ниже</a>.
+                </p>
+            </div>
         </div>
     </section>
 
@@ -505,44 +513,50 @@
     <section class="strategies" id="strategies">
         <div class="strategies-content">
             <h2 class="section-title">Торговые стратегии</h2>
-            <p class="section-subtitle">Мы используем 6 проверенных стратегий для генерации сигналов</p>
+            <p class="section-subtitle">Мы используем 7 проверенных стратегий для генерации сигналов</p>
             
             <div class="strategies-grid">
-                <div class="strategy-item">
+                <a href="{{ route('strategy.show', 'mtf') }}" class="strategy-item" style="text-decoration: none; color: inherit;">
                     <div class="strategy-icon">📈</div>
                     <h3 class="strategy-name">MTF Strategy</h3>
                     <p class="strategy-desc">Multi-TimeFrame - Мультитаймфреймовая стратегия с анализом на нескольких таймфреймах (5м, 15м, 1ч) для точного определения точек входа.</p>
-                </div>
+                </a>
 
-                <div class="strategy-item">
+                <a href="{{ route('strategy.show', 'ema-rsi-macd') }}" class="strategy-item" style="text-decoration: none; color: inherit;">
                     <div class="strategy-icon">🧠</div>
                     <h3 class="strategy-name">EMA + RSI + MACD</h3>
                     <p class="strategy-desc">Универсальная трендовая стратегия, использующая пересечения EMA, импульс MACD и фильтр RSI для определения направления тренда.</p>
-                </div>
+                </a>
 
-                <div class="strategy-item">
+                <a href="{{ route('strategy.show', 'bollinger-rsi') }}" class="strategy-item" style="text-decoration: none; color: inherit;">
                     <div class="strategy-icon">💥</div>
                     <h3 class="strategy-name">Bollinger Bands + RSI</h3>
                     <p class="strategy-desc">Контртрендовая стратегия для боковых рынков, использующая отскоки от границ Bollinger Bands с подтверждением RSI.</p>
-                </div>
+                </a>
 
-                <div class="strategy-item">
+                <a href="{{ route('strategy.show', 'ema-stochastic') }}" class="strategy-item" style="text-decoration: none; color: inherit;">
                     <div class="strategy-icon">⚡</div>
                     <h3 class="strategy-name">EMA + Stochastic</h3>
                     <p class="strategy-desc">Скальпинговая стратегия для быстрой торговли, использует пересечения EMA и выход Stochastic из зон перекупленности/перепроданности.</p>
-                </div>
+                </a>
 
-                <div class="strategy-item">
+                <a href="{{ route('strategy.show', 'supertrend-vwap') }}" class="strategy-item" style="text-decoration: none; color: inherit;">
                     <div class="strategy-icon">📊</div>
                     <h3 class="strategy-name">SuperTrend + VWAP</h3>
                     <p class="strategy-desc">Внутридневная трендовая стратегия, сочетающая индикатор SuperTrend для определения тренда и VWAP для справедливой цены.</p>
-                </div>
+                </a>
 
-                <div class="strategy-item">
-                    <div class="strategy-icon">🔥</div>
+                <a href="{{ route('strategy.show', 'ichimoku-rsi') }}" class="strategy-item" style="text-decoration: none; color: inherit;">
+                    <div class="strategy-icon">☁️</div>
                     <h3 class="strategy-name">Ichimoku + RSI</h3>
-                    <p class="strategy-desc">Трендовая стратегия с поддержкой облака Ишимоку, использует облако для определения тренда и RSI для фильтрации сигналов.</p>
-                </div>
+                    <p class="strategy-desc">Долгосрочная трендовая стратегия с облачной поддержкой, использует облако Ишимоку для определения тренда и RSI для фильтрации сигналов.</p>
+                </a>
+
+                <a href="{{ route('strategy.show', 'smart-money-concepts') }}" class="strategy-item" style="text-decoration: none; color: inherit;">
+                    <div class="strategy-icon">💎</div>
+                    <h3 class="strategy-name">Smart Money Concepts</h3>
+                    <p class="strategy-desc">Продвинутая стратегия на основе Order Blocks, Market Structure (BOS/CHOCH), Fair Value Gaps и зон ликвидности. Требует четкий тренд на H4 и возврат к Order Block.</p>
+                </a>
             </div>
         </div>
     </section>
@@ -581,7 +595,7 @@
 
     <!-- Footer -->
     <footer class="footer">
-        <p>&copy; 2025 Traiding Helper Pro. Все права защищены.</p>
+        <p>&copy; 2025 Trading Helper Pro. Все права защищены.</p>
     </footer>
 </body>
 </html>

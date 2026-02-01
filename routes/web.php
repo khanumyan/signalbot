@@ -22,6 +22,9 @@ Route::post('/logout', [App\Http\Controllers\Auth\LoginController::class, 'logou
 // Public landing page
 Route::get('/', [App\Http\Controllers\LandingController::class, 'index'])->name('landing');
 
+// Public strategy pages
+Route::get('/strategies/{strategy}', [App\Http\Controllers\StrategyController::class, 'show'])->name('strategy.show');
+
 // Protected routes (require authentication)
 Route::middleware('auth')->group(function () {
     // Dashboard routes (old home)
