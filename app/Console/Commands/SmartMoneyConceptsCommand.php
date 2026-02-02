@@ -82,8 +82,8 @@ class SmartMoneyConceptsCommand extends Command
                 $this->info('📱 Sending signals to instant signal bot...');
                 foreach ($this->analysisSignals as $symbol => $signals) {
                     foreach ($signals as $signal) {
-                        // 🔥 Отправляем только STRONG сигналы (ужесточенные критерии)
-                        if ($signal['strength'] === 'STRONG') {
+                        // 🔥 Отправляем только STRONG и MEDIUM сигналы
+                        if (in_array($signal['strength'], ['STRONG', 'MEDIUM'])) {
                             // 🔒 Глобальный фильтр: проверка рыночного контекста
                             $marketContext = $this->analysisService->checkMarketContext($symbol, $signal['type']);
                             
@@ -92,9 +92,34 @@ class SmartMoneyConceptsCommand extends Command
                                 continue;
                             }
                             
-                            if (CryptoSignal::shouldSendSignal($symbol, $signal['type'], $signal['strength'], 'Smart Money Concepts', $signal['rsi'] ?? null)) {
-                                $this->telegramService->sendInstantSignal($signal, $symbol, 'Smart Money Concepts');
-                                $this->saveSignalToDatabase($signal, $symbol);
+                            // Передаем htfTrend для правильной проверки в shouldSendSignal
+                            if (CryptoSignal::shouldSendSignal($symbol, $signal['type'], $signal['strength'], 'Smart Money Concepts', $signal['rsi'] ?? null, $signal['htf_trend'] ?? null)) {
+                                try {
+                                    $sent = $this->telegramService->sendInstantSignal($signal, $symbol, 'Smart Money Concepts');
+                                    if ($sent) {
+                                        $this->info("✅ Signal sent to Telegram: {$symbol} {$signal['type']} ({$signal['strength']})");
+                                        $this->saveSignalToDatabase($signal, $symbol, true);
+                                    } else {
+                                        $this->warn("⚠️ Failed to send signal to Telegram: {$symbol} {$signal['type']} ({$signal['strength']})");
+                                        Log::warning("Smart Money Concepts: Failed to send signal to Telegram", [
+                                            'symbol' => $symbol,
+                                            'type' => $signal['type'],
+                                            'strength' => $signal['strength']
+                                        ]);
+                                        // Сохраняем сигнал даже если отправка не удалась
+                                        $this->saveSignalToDatabase($signal, $symbol, false);
+                                    }
+                                } catch (\Exception $e) {
+                                    $this->error("❌ Error sending signal to Telegram: {$symbol} - " . $e->getMessage());
+                                    Log::error("Smart Money Concepts: Error sending signal", [
+                                        'symbol' => $symbol,
+                                        'error' => $e->getMessage()
+                                    ]);
+                                    // Сохраняем сигнал даже при ошибке
+                                    $this->saveSignalToDatabase($signal, $symbol, false);
+                                }
+                            } else {
+                                $this->info("⏭️ Skipping {$symbol}: {$signal['type']} - duplicate signal (shouldSendSignal returned false)");
                             }
                             usleep(500000);
                         } elseif ($signal['strength'] === 'WEAK') {
@@ -162,10 +187,10 @@ class SmartMoneyConceptsCommand extends Command
         ];
     }
 
-    private function saveSignalToDatabase(array $signal, string $symbol): void
+    private function saveSignalToDatabase(array $signal, string $symbol, bool $sentToTelegram = false): void
     {
         try {
-            CryptoSignal::saveSignal([
+            $savedSignal = CryptoSignal::saveSignal([
                 'symbol' => $symbol,
                 'strategy' => 'Smart Money Concepts',
                 'type' => $signal['type'],
@@ -182,7 +207,13 @@ class SmartMoneyConceptsCommand extends Command
                 'reason' => $signal['reason']
             ]);
 
-            $this->info("💾 Signal saved to database: {$symbol} {$signal['type']} ({$signal['strength']})");
+            // Обновляем статус отправки в Telegram
+            if ($sentToTelegram) {
+                $savedSignal->sent_to_telegram = true;
+                $savedSignal->save();
+            }
+
+            $this->info("💾 Signal saved to database: {$symbol} {$signal['type']} ({$signal['strength']}) - sent: " . ($sentToTelegram ? 'YES' : 'NO'));
         } catch (\Exception $e) {
             Log::error("Failed to save Smart Money Concepts signal", ['symbol' => $symbol, 'error' => $e->getMessage()]);
         }

@@ -276,6 +276,63 @@ class TelegramService
         return $success;
     }
 
+    /**
+     * Экранирует специальные символы Markdown для безопасной отправки в Telegram
+     */
+    protected function escapeMarkdown(string $text): string
+    {
+        // Экранируем специальные символы Markdown, но НЕ экранируем точки в числах
+        // Сначала защищаем числа с точками, потом экранируем, потом возвращаем числа
+        $placeholders = [];
+        $counter = 0;
+        
+        // Заменяем числа с точками на плейсхолдеры
+        $text = preg_replace_callback('/\d+\.\d+/', function($matches) use (&$placeholders, &$counter) {
+            $placeholder = "___NUMBER_{$counter}___";
+            $placeholders[$placeholder] = $matches[0];
+            $counter++;
+            return $placeholder;
+        }, $text);
+        
+        // Экранируем специальные символы Markdown (кроме точки, чтобы не ломать числа)
+        $text = str_replace(
+            ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '!'],
+            ['\\_', '\\*', '\\[', '\\]', '\\(', '\\)', '\\~', '\\`', '\\>', '\\#', '\\+', '\\-', '\\=', '\\|', '\\{', '\\}', '\\!'],
+            $text
+        );
+        
+        // Возвращаем числа на место
+        foreach ($placeholders as $placeholder => $number) {
+            $text = str_replace($placeholder, $number, $text);
+        }
+        
+        return $text;
+    }
+
+    /**
+     * Конвертирует Markdown сообщение в HTML для Telegram
+     */
+    protected function convertMarkdownToHtml(string $markdown): string
+    {
+        // Простая конвертация основных элементов Markdown в HTML
+        $html = $markdown;
+        
+        // Заголовки и жирный текст
+        $html = preg_replace('/\*\*(.+?)\*\*/', '<b>$1</b>', $html);
+        $html = preg_replace('/\*(.+?)\*/', '<i>$1</i>', $html);
+        
+        // Курсив
+        $html = preg_replace('/_(.+?)_/', '<i>$1</i>', $html);
+        
+        // Код
+        $html = preg_replace('/`(.+?)`/', '<code>$1</code>', $html);
+        
+        // Ссылки
+        $html = preg_replace('/\[(.+?)\]\((.+?)\)/', '<a href="$2">$1</a>', $html);
+        
+        return $html;
+    }
+
     protected function formatInstantSignalMessage(array $signal, string $symbol, string $strategy = 'MTF'): string
     {
         $emoji = $signal['type'] === 'BUY' ? '🟢' : '🔴';
@@ -355,6 +412,7 @@ class TelegramService
             $message .= "Order Block: `$" . rtrim(rtrim($signal['order_block_low'], '0'), '.') . "` - `$" . rtrim(rtrim($signal['order_block_high'], '0'), '.') . "`\n";
         }
         if (isset($signal['market_structure'])) {
+            // Экранируем специальные символы в market_structure (но не внутри backticks)
             $message .= "Market Structure: `{$signal['market_structure']}`\n";
         }
 
@@ -372,7 +430,12 @@ class TelegramService
 
         $message .= "\n";
 
-        $message .= "_{$signal['reason']}_\n";
+        // Экранируем специальные символы Markdown в reason
+        // Важно: экранируем ВСЕ символы, так как reason будет внутри курсива (_text_)
+        $reason = $signal['reason'] ?? '';
+        // Экранируем все специальные символы, включая подчеркивания
+        $escapedReason = $this->escapeMarkdown($reason);
+        $message .= "_{$escapedReason}_\n";
         $message .= "⚡ `" . now()->addHours(4)->format('H:i:s') . "`";
 
         return $message;
@@ -426,13 +489,27 @@ class TelegramService
 
         foreach ($activeUsers as $chatId) {
             try {
-                $this->instantTelegram->sendMessage([
-                    'chat_id' => $chatId,
-                    'text' => $message,
-                    'parse_mode' => 'Markdown'
-                ]);
-                Log::info("Instant signal sent successfully to chat {$chatId}");
-                $successCount++;
+                // Пробуем сначала с Markdown
+                try {
+                    $this->instantTelegram->sendMessage([
+                        'chat_id' => $chatId,
+                        'text' => $message,
+                        'parse_mode' => 'Markdown'
+                    ]);
+                    Log::info("Instant signal sent successfully to chat {$chatId} (Markdown)");
+                    $successCount++;
+                } catch (TelegramSDKException $e) {
+                    // Если Markdown не работает, пробуем HTML
+                    Log::warning("Markdown parse failed for chat {$chatId}, trying HTML: " . $e->getMessage());
+                    $htmlMessage = $this->convertMarkdownToHtml($message);
+                    $this->instantTelegram->sendMessage([
+                        'chat_id' => $chatId,
+                        'text' => $htmlMessage,
+                        'parse_mode' => 'HTML'
+                    ]);
+                    Log::info("Instant signal sent successfully to chat {$chatId} (HTML)");
+                    $successCount++;
+                }
                 // Небольшая задержка между отправками, чтобы не превысить лимиты API
                 usleep(50000); // 50ms задержка
             } catch (TelegramSDKException $e) {
@@ -683,19 +760,6 @@ class TelegramService
             Log::debug("Failed to check image accessibility for {$url}: " . $e->getMessage());
             return null;
         }
-    }
-
-    /**
-     * Escape Markdown special characters
-     */
-    protected function escapeMarkdown(string $text): string
-    {
-        // Escape special Markdown characters: _ * [ ] ( ) ~ ` > # + - = | { } . !
-        return str_replace(
-            ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!'],
-            ['\_', '\*', '\[', '\]', '\(', '\)', '\~', '\`', '\>', '\#', '\+', '\-', '\=', '\|', '\{', '\}', '\.', '\!'],
-            $text
-        );
     }
 
     /**
