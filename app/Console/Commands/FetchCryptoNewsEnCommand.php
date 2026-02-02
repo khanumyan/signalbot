@@ -54,6 +54,7 @@ class FetchCryptoNewsEnCommand extends Command
 
             $newArticles = 0;
             $sentToTelegram = 0;
+            $skippedBlacklisted = 0;
 
             foreach ($data['results'] as $article) {
                 if (empty($article['article_id'])) {
@@ -112,14 +113,31 @@ class FetchCryptoNewsEnCommand extends Command
 
                 $newArticles++;
 
-                // Send to Telegram
-                if ($this->telegramService->sendCryptoNews($cryptoNews)) {
+                // Проверяем черный список перед отправкой
+                $blacklistedSources = config('crypto_news.blacklisted_sources', []);
+                $sourceName = $cryptoNews->source_name ? trim($cryptoNews->source_name) : null;
+                $isBlacklisted = false;
+                
+                if ($sourceName) {
+                    foreach ($blacklistedSources as $blacklistedSource) {
+                        if (strcasecmp($sourceName, trim($blacklistedSource)) === 0) {
+                            $isBlacklisted = true;
+                            $skippedBlacklisted++;
+                            $cryptoNews->update(['sent_to_telegram' => false]); // Помечаем как не отправленную
+                            break;
+                        }
+                    }
+                }
+
+                // Send to Telegram только если не в черном списке
+                if (!$isBlacklisted && $this->telegramService->sendCryptoNews($cryptoNews)) {
                     $cryptoNews->update(['sent_to_telegram' => true]);
                     $sentToTelegram++;
                 }
             }
 
-            $this->info("✅ Processed: {$newArticles} new articles, {$sentToTelegram} sent to Telegram");
+            $this->info("✅ Processed: {$newArticles} new articles, {$sentToTelegram} sent to Telegram" . 
+                       ($skippedBlacklisted > 0 ? ", {$skippedBlacklisted} skipped (blacklisted sources)" : ""));
 
             return Command::SUCCESS;
 

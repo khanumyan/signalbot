@@ -611,6 +611,23 @@ class TelegramService
      */
     public function sendCryptoNews(\App\Models\CryptoNews $news): bool
     {
+        // Проверяем, не находится ли источник в черном списке
+        if ($news->source_name) {
+            $blacklistedSources = config('crypto_news.blacklisted_sources', []);
+            
+            // Проверяем точное совпадение (case-insensitive)
+            $sourceName = trim($news->source_name);
+            foreach ($blacklistedSources as $blacklistedSource) {
+                if (strcasecmp($sourceName, trim($blacklistedSource)) === 0) {
+                    Log::info("Skipping news from blacklisted source: {$sourceName}", [
+                        'article_id' => $news->article_id,
+                        'title' => $news->title
+                    ]);
+                    return false; // Не отправляем новость из черного списка
+                }
+            }
+        }
+        
         $chatId = -1003511743710; // News channel chat ID
         
         try {
