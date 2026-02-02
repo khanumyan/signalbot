@@ -82,8 +82,8 @@ class SmartMoneyConceptsCommand extends Command
                 $this->info('📱 Sending signals to instant signal bot...');
                 foreach ($this->analysisSignals as $symbol => $signals) {
                     foreach ($signals as $signal) {
-                        // 🔥 Отправляем только STRONG и MEDIUM сигналы
-                        if (in_array($signal['strength'], ['STRONG', 'MEDIUM'])) {
+                        // 🔥 Отправляем только STRONG сигналы
+                        if ($signal['strength'] === 'STRONG') {
                             // 🔒 Глобальный фильтр: проверка рыночного контекста
                             $marketContext = $this->analysisService->checkMarketContext($symbol, $signal['type']);
                             

@@ -1410,9 +1410,9 @@ class CryptoAnalysisService
         $atr = $this->calculateATR($highs, $lows, $closes, $params['atr_period'] ?? 14);
         $adx = $this->calculateADX($highs, $lows, $closes, $adxPeriod);
 
-        // 🔒 1. УЖЕСТОЧЕННЫЙ FILTER: ADX ≥ 25 И ATR ≥ 0.6%
+        // 🔒 1. FILTER: ADX > 20 ИЛИ ATR волатильность > 0.4%
         $atrVolatilityPercent = $price > 0 ? (($atr / $price) * 100) : 0;
-        $hasMomentum = $adx['adx'] >= $adxThreshold && $atrVolatilityPercent >= $atrVolatilityThreshold;
+        $hasMomentum = ($adx['adx'] > 20) || ($atrVolatilityPercent > 0.4);
         
         if (!$hasMomentum) {
             // No momentum - return HOLD
@@ -1429,7 +1429,7 @@ class CryptoAnalysisService
                 'short_probability' => 50,
                 'stop_loss' => $price,
                 'take_profit' => $price,
-                'reason' => "Нет импульса: ADX=" . number_format($adx['adx'], 2) . " (требуется ≥{$adxThreshold}), ATR волатильность=" . number_format($atrVolatilityPercent, 2) . "% (требуется ≥{$atrVolatilityThreshold}%)",
+                'reason' => "Нет импульса: ADX=" . number_format($adx['adx'], 2) . " (требуется >20) ИЛИ ATR волатильность=" . number_format($atrVolatilityPercent, 2) . "% (требуется >0.4%)",
                 'strength' => 'WEAK'
             ];
         }
@@ -1557,10 +1557,10 @@ class CryptoAnalysisService
             }
         }
 
-        // 🔒 3. УЖЕСТОЧЕННОЕ SCORING: Minimum total score 85, minimum difference 25%
+        // 🔒 3. SCORING: Minimum total score 80, minimum difference 20%
         $totalScore = $longScore + $shortScore;
         
-        if ($totalScore < 85) {
+        if ($totalScore < 80) {
             // Total score too low - return HOLD
             return [
                 'price' => $price,
@@ -1575,7 +1575,7 @@ class CryptoAnalysisService
                 'short_probability' => 50,
                 'stop_loss' => $price,
                 'take_profit' => $price,
-                'reason' => "Низкий общий балл: {$totalScore} (требуется >= 85)",
+                'reason' => "Низкий общий балл: {$totalScore} (требуется >= 80)",
                 'strength' => 'WEAK'
             ];
         }
@@ -1584,8 +1584,8 @@ class CryptoAnalysisService
         $shortProb = $totalScore > 0 ? round(($shortScore / $totalScore) * 100) : 50;
         $probDifference = abs($longProb - $shortProb);
 
-        // 🔒 3. Minimum difference 25%
-        if ($probDifference < 25) {
+        // 🔒 3. Minimum difference 20%
+        if ($probDifference < 20) {
             return [
                 'price' => $price,
                 'supertrend_value' => $superTrend['value'],
@@ -1599,7 +1599,7 @@ class CryptoAnalysisService
                 'short_probability' => $shortProb,
                 'stop_loss' => $price,
                 'take_profit' => $price,
-                'reason' => "Недостаточная разница вероятностей: {$probDifference}% (требуется >= 25%)",
+                'reason' => "Недостаточная разница вероятностей: {$probDifference}% (требуется >= 20%)",
                 'strength' => 'WEAK'
             ];
         }
@@ -2241,7 +2241,7 @@ class CryptoAnalysisService
             }
             
             // Тейк-профит: на ближайшей зоне ликвидности выше или на основе структуры
-            $takeProfit = $price + ($atr * 3.5); // Базовый TP
+            $takeProfit = $price + ($atr * 7.0); // Базовый TP (ATR × 7)
             
             // Ищем ближайшую ликвидность выше для TP
             $nearestLiquidityForTP = null;
@@ -2269,7 +2269,7 @@ class CryptoAnalysisService
             }
             
             // Тейк-профит: на ближайшей зоне ликвидности ниже
-            $takeProfit = $price - ($atr * 3.5); // Базовый TP
+            $takeProfit = $price - ($atr * 7.0); // Базовый TP (ATR × 7)
             
             // Ищем ближайшую ликвидность ниже для TP
             $nearestLiquidityForTP = null;

@@ -180,8 +180,8 @@ class CryptoAnalysisCommand extends Command
                 $this->analysisSignals[$symbol] = $signals;
 
                 foreach ($signals as $signal) {
-                    // 🔥 Отправляем только STRONG и MEDIUM (WEAK уже отфильтрованы выше)
-                    if (in_array($signal['strength'], ['STRONG', 'MEDIUM'])) {
+                    // 🔥 MTF стратегия: Отправляем только STRONG сигналы
+                    if ($signal['strength'] === 'STRONG') {
                         // 🔒 Глобальный фильтр: проверка рыночного контекста
                         $marketContext = $this->analysisService->checkMarketContext($symbol, $signal['type']);
                         
@@ -434,29 +434,27 @@ class CryptoAnalysisCommand extends Command
         }
 
         // Проверяем HTF с учетом силы сигнала
-        $htfAllowedForStrength = $this->isSignalAllowedByHTF($baseSignal, $htfTrend, $preliminaryStrength);
+        // HTF тренд должен поддерживать: BUY в BULLISH/NEUTRAL, SELL в BEARISH/NEUTRAL
+        $htfSupportsSignal = $this->isSignalAllowedByHTF($baseSignal, $htfTrend, 'STRONG');
 
-        // STRONG: требуется полное MTF подтверждение + строгий HTF
-        if ($preliminaryStrength === 'STRONG') {
-            // Сценарий A: Максимальный приоритет - полное MTF + все TF совпадают
-            if ($htfAllowedForStrength && $ltfConfirmed) {
-                $canSendSignal = true;
-                $signalStrength = 'STRONG';
-            }
-            // Сценарий B: Без LTF, но с усилением (RSI ≤10/≥90 + ADX ≥25)
-            elseif ($htfAllowedForStrength && (($rsi15m <= 10 && $baseSignal === 'BUY') || ($rsi15m >= 90 && $baseSignal === 'SELL'))) {
-                // Проверяем ADX (будет добавлено в calculateMTFStrength)
-                $canSendSignal = true;
-                $signalStrength = 'STRONG';
-            }
-        }
-
-        // MEDIUM: только при идеальном контексте
-        if ($preliminaryStrength === 'MEDIUM') {
-            // MEDIUM допускается только если: RSI ≤20/≥80 + полное MTF + строгий HTF (не NEUTRAL)
-            if ($htfAllowedForStrength && $ltfConfirmed && $htfTrend !== 'NEUTRAL') {
-                $canSendSignal = true;
-                $signalStrength = 'MEDIUM';
+        // 🔥 STRONG: только при выполнении критериев
+        // Критерий 1: RSI ≤15 или ≥85 + полное MTF подтверждение (HTF + LTF)
+        // Критерий 2: RSI ≤15 или ≥85 + HTF подтверждение
+        if ($preliminaryStrength === 'STRONG' && $htfSupportsSignal) {
+            // Проверяем экстремальный RSI для STRONG
+            $extremeRsi = ($rsi15m <= 15 && $baseSignal === 'BUY') || ($rsi15m >= 85 && $baseSignal === 'SELL');
+            
+            if ($extremeRsi) {
+                // Сценарий A: Полное MTF подтверждение (HTF + LTF)
+                if ($htfAllowed && $ltfConfirmed) {
+                    $canSendSignal = true;
+                    $signalStrength = 'STRONG';
+                }
+                // Сценарий B: Только HTF подтверждение
+                elseif ($htfAllowed) {
+                    $canSendSignal = true;
+                    $signalStrength = 'STRONG';
+                }
             }
         }
 
@@ -520,15 +518,14 @@ class CryptoAnalysisCommand extends Command
 
     private function getBaseSignal15m(float $rsi15m, float $rsi1h, float $price15m, array $bb15m): ?string
     {
-        // 🔥 НОВЫЕ БАЗОВЫЕ УСЛОВИЯ: Обязательный HTF RSI фильтр
-        
-        // BUY сигнал на 15m: RSI ≤ 30 И HTF RSI ≤ 40
-        if ($rsi15m <= 30 && $rsi1h <= 40) {
+        // 🔥 БАЗОВЫЕ УСЛОВИЯ: только RSI на 15m
+        // BUY: RSI ≤ 30 на 15m
+        if ($rsi15m <= 30) {
             return 'BUY';
         }
 
-        // SELL сигнал на 15m: RSI ≥ 70 И HTF RSI ≥ 60
-        if ($rsi15m >= 70 && $rsi1h >= 60) {
+        // SELL: RSI ≥ 70 на 15m
+        if ($rsi15m >= 70) {
             return 'SELL';
         }
 
@@ -539,32 +536,16 @@ class CryptoAnalysisCommand extends Command
     {
         if (!$baseSignal) return false;
 
-        // 🔥 УЖЕСТОЧЕННЫЕ ТРЕБОВАНИЯ К HTF ТРЕНДУ
+        // 🔥 HTF ТРЕНД ДОЛЖЕН ПОДДЕРЖИВАТЬ СИГНАЛ
+        // BUY разрешен в BULLISH/NEUTRAL
+        // SELL разрешен в BEARISH/NEUTRAL
         
-        // STRONG: Только строгое совпадение направления
-        if ($strength === 'STRONG') {
-            // BUY STRONG разрешен ТОЛЬКО в бычьем тренде
-            if ($baseSignal === 'BUY' && $htfTrend === 'BULLISH') {
-                return true;
-            }
-            // SELL STRONG разрешен ТОЛЬКО в медвежьем тренде
-            if ($baseSignal === 'SELL' && $htfTrend === 'BEARISH') {
-                return true;
-            }
-            return false;
+        if ($baseSignal === 'BUY' && in_array($htfTrend, ['BULLISH', 'NEUTRAL'])) {
+            return true;
         }
-
-        // MEDIUM: BULLISH/BEARISH (NEUTRAL исключен)
-        if ($strength === 'MEDIUM') {
-            // BUY MEDIUM разрешен только в бычьем тренде
-            if ($baseSignal === 'BUY' && $htfTrend === 'BULLISH') {
-                return true;
-            }
-            // SELL MEDIUM разрешен только в медвежьем тренде
-            if ($baseSignal === 'SELL' && $htfTrend === 'BEARISH') {
-                return true;
-            }
-            return false;
+        
+        if ($baseSignal === 'SELL' && in_array($htfTrend, ['BEARISH', 'NEUTRAL'])) {
+            return true;
         }
 
         return false;
@@ -595,21 +576,17 @@ class CryptoAnalysisCommand extends Command
         bool $ltfConfirmed = false
     ): string {
         $rsi15m = $indicators15m['rsi'];
-        $rsi5m = $indicators5m['rsi'];
 
-        // 🔥 УЖЕСТОЧЕННАЯ ЛОГИКА СИЛЫ СИГНАЛА
-        
-        // STRONG: Повышенные лимиты RSI
-        // BUY STRONG: RSI ≤ 12
-        // SELL STRONG: RSI ≥ 88
-        if (($rsi15m <= 12 && $baseSignal === 'BUY') || ($rsi15m >= 88 && $baseSignal === 'SELL')) {
+        // 🔥 КРИТЕРИИ СИЛЫ СИГНАЛА ДЛЯ MTF
+        // STRONG: RSI ≤15 или ≥85 (экстремальные значения)
+        if (($rsi15m <= 15 && $baseSignal === 'BUY') || ($rsi15m >= 85 && $baseSignal === 'SELL')) {
             return 'STRONG';
         }
 
-        // MEDIUM: Ограниченные условия
-        // BUY MEDIUM: RSI ≤ 20
-        // SELL MEDIUM: RSI ≥ 80
-        if (($rsi15m <= 20 && $baseSignal === 'BUY') || ($rsi15m >= 80 && $baseSignal === 'SELL')) {
+        // MEDIUM: RSI ≤25 или ≥75 (для внутренней логики, но не отправляется)
+        // BUY MEDIUM: RSI ≤25
+        // SELL MEDIUM: RSI ≥75
+        if (($rsi15m <= 25 && $baseSignal === 'BUY') || ($rsi15m >= 75 && $baseSignal === 'SELL')) {
             return 'MEDIUM';
         }
 
