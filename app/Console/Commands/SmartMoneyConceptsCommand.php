@@ -12,12 +12,12 @@ class SmartMoneyConceptsCommand extends Command
 {
     protected $signature = 'crypto:smart-money-concepts
                             {--symbol= : Analyze specific symbol}
-                            {--interval=15m : Time interval (15m, 1h, 4h)}
-                            {--limit=200 : Number of candles to fetch}
+                            {--interval=5m : Time interval (5m, 15m, 1h, 4h)}
+                            {--limit=300 : Number of candles to fetch}
                             {--telegram : Send signals to Telegram}
                             {--telegram-only : Only send to Telegram, no console output}';
 
-    protected $description = '💎 Smart Money Concepts Strategy: SMC with Order Blocks, BOS/CHOCH, FVG';
+    protected $description = '💎 Smart Money Concepts Scalping Strategy (LuxAlgo-style): SMC with Liquidity Sweep, CHOCH, Order Block Retest';
 
     protected array $analysisSignals = [];
     protected array $analysisErrors = [];

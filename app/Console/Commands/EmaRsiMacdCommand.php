@@ -3,7 +3,6 @@
 namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use App\Services\TelegramService;
 use App\Services\CryptoAnalysisService;
@@ -83,8 +82,8 @@ class EmaRsiMacdCommand extends Command
                 $this->info('📱 Sending signals to instant signal bot...');
                 foreach ($this->analysisSignals as $symbol => $signals) {
                     foreach ($signals as $signal) {
-                        // 🔥 Отправляем только STRONG сигналы (MEDIUM исключены для этой стратегии)
-                        if (in_array($signal['strength'], ['STRONG'])) {
+                        // 🔥 Отправляем только STRONG и MEDIUM сигналы
+                        if (in_array($signal['strength'], ['STRONG', 'MEDIUM'])) {
                             // 🔒 Глобальный фильтр: проверка рыночного контекста
                             $marketContext = $this->analysisService->checkMarketContext($symbol, $signal['type']);
                             
@@ -94,8 +93,25 @@ class EmaRsiMacdCommand extends Command
                             }
                             
                             if (CryptoSignal::shouldSendSignal($symbol, $signal['type'], $signal['strength'], 'EMA+RSI+MACD', $signal['rsi'])) {
-                                $this->telegramService->sendInstantSignal($signal, $symbol, 'EMA+RSI+MACD');
-                                $this->saveSignalToDatabase($signal, $symbol);
+                                try {
+                                    $sent = $this->telegramService->sendInstantSignal($signal, $symbol, 'EMA+RSI+MACD');
+                                    if ($sent) {
+                                        $this->info("✅ Signal sent to Telegram: {$symbol} {$signal['type']} ({$signal['strength']})");
+                                        $this->saveSignalToDatabase($signal, $symbol, true);
+                                    } else {
+                                        $this->warn("⚠️ Failed to send signal to Telegram: {$symbol} {$signal['type']} ({$signal['strength']})");
+                                        $this->saveSignalToDatabase($signal, $symbol, false);
+                                    }
+                                } catch (\Exception $e) {
+                                    $this->error("❌ Error sending signal to Telegram: {$symbol} - " . $e->getMessage());
+                                    Log::error("EMA+RSI+MACD: Error sending signal", [
+                                        'symbol' => $symbol,
+                                        'error' => $e->getMessage()
+                                    ]);
+                                    $this->saveSignalToDatabase($signal, $symbol, false);
+                                }
+                            } else {
+                                $this->info("⏭️ Skipping {$symbol}: {$signal['type']} - duplicate signal (shouldSendSignal returned false)");
                             }
                             usleep(500000);
                         } elseif ($signal['strength'] === 'WEAK') {
@@ -119,224 +135,55 @@ class EmaRsiMacdCommand extends Command
 
     private function analyzeSymbol(string $symbol, string $interval, int $limit): void
     {
-        $klines = $this->fetchKlinesData($symbol, $interval, $limit);
+        try {
+            $params = [
+                'interval' => $interval,
+                'limit' => $limit,
+            ];
 
-        if (empty($klines) || count($klines) < 100) {
-            $this->analysisErrors[$symbol] = "Insufficient data";
-            return;
-        }
+            $result = $this->analysisService->analyzeEmaRsiMacd($symbol, $params);
 
-        $closes = array_map(fn($k) => (float) $k[4], $klines);
-        $highs = array_map(fn($k) => (float) $k[2], $klines);
-        $lows = array_map(fn($k) => (float) $k[3], $klines);
+            if ($result['signal'] === 'HOLD') {
+                return;
+            }
 
-        $ema20 = $this->calculateEMA($closes, 20);
-        $ema50 = $this->calculateEMA($closes, 50);
-        $rsi = $this->calculateRSI($closes, 14);
-        $macd = $this->calculateMACD($closes);
-        $atr = $this->calculateATR($highs, $lows, $closes, 14);
-
-        $signal = $this->generateSignal($symbol, end($closes), $ema20, $ema50, $rsi, $macd, $atr);
-
-        if ($signal) {
-            $this->analysisSignals[$symbol] = [$signal];
+            $signal = $this->convertResultToSignal($result);
+            
+            if ($signal) {
+                $this->analysisSignals[$symbol] = [$signal];
+            }
+        } catch (\Exception $e) {
+            $this->analysisErrors[$symbol] = $e->getMessage();
+            Log::error("EMA+RSI+MACD analysis error for {$symbol}: " . $e->getMessage());
         }
     }
 
-    private function generateSignal(string $symbol, float $price, float $ema20, float $ema50, float $rsi, array $macd, float $atr): ?array
+    private function convertResultToSignal(array $result): ?array
     {
-        $macdLine = $macd['macd'];
-        $macdSignal = $macd['signal'];
-        $macdHist = $macd['histogram'];
-
-        $signalType = null;
-        $strength = 'WEAK';
-
-        // 🔥 УЖЕСТОЧЕННЫЕ КРИТЕРИИ: BUY - Price crosses above EMA20, EMA20 > EMA50, MACD crosses above 0
-        if ($price > $ema20 && $ema20 > $ema50 && $macdLine > 0 && $macdHist > 0 && $rsi < 70) {
-            $signalType = 'BUY';
-
-            // 🔥 Новые лимиты RSI: STRONG ≤12, MEDIUM ≤20
-            if ($rsi <= 12 && abs($macdHist) > 0.5) {
-                $strength = 'STRONG';
-            } elseif ($rsi <= 20 && abs($macdHist) > 0.3) {
-                $strength = 'MEDIUM';
-            }
-        }
-        // 🔥 УЖЕСТОЧЕННЫЕ КРИТЕРИИ: SELL - Price crosses below EMA20, EMA20 < EMA50, MACD crosses below 0
-        elseif ($price < $ema20 && $ema20 < $ema50 && $macdLine < 0 && $macdHist < 0 && $rsi > 30) {
-            $signalType = 'SELL';
-
-            // 🔥 Новые лимиты RSI: STRONG ≥88, MEDIUM ≥80
-            if ($rsi >= 88 && abs($macdHist) > 0.5) {
-                $strength = 'STRONG';
-            } elseif ($rsi >= 80 && abs($macdHist) > 0.3) {
-                $strength = 'MEDIUM';
-            }
-        }
-
-        if (!$signalType) {
-            return null;
-        }
-
-        $slTp = $this->calculateSLTP($signalType, $price, $atr, $strength);
-
         return [
-            'type' => $signalType,
-            'strength' => $strength,
-            'price' => $price,
-            'rsi' => $rsi,
-            'ema' => $ema20,
-            'macd' => $macdLine,
-            'macd_signal' => $macdSignal,
-            'macd_histogram' => $macdHist,
-            'atr' => $atr,
-            'stop_loss' => $slTp['stop_loss'],
-            'take_profit' => $slTp['take_profit'],
+            'type' => $result['signal'],
+            'strength' => $result['strength'],
+            'price' => $result['price'],
+            'rsi' => $result['rsi'],
+            'ema' => $result['ema_fast'],
+            'macd' => $result['macd'],
+            'macd_signal' => $result['macd_signal'],
+            'macd_histogram' => $result['macd_histogram'],
+            'stop_loss' => $result['stop_loss'],
+            'take_profit' => $result['take_profit'],
             'volume_ratio' => 1.0,
             'htf_trend' => 'N/A',
             'htf_rsi' => 0,
             'ltf_rsi' => 0,
-            'reason' => $this->generateReason($signalType, $rsi, $ema20, $ema50, $macdLine, $macdHist)
+            'reason' => $result['reason']
         ];
     }
 
-    private function calculateSLTP(string $type, float $price, float $atr, string $strength): array
-    {
-        $multiplier = match($strength) {
-            'STRONG' => ['sl' => 2.3, 'tp' => 4.5], // RR 1:2.25
-            'MEDIUM' => ['sl' => 2.3, 'tp' => 3.0], // RR 1:1.5
-            default => ['sl' => 2.3, 'tp' => 2.25]  // RR 1:1.125
-        };
 
-        if ($type === 'BUY') {
-            return [
-                'stop_loss' => $price - ($atr * $multiplier['sl']),
-                'take_profit' => $price + ($atr * $multiplier['tp'])
-            ];
-        } else {
-            return [
-                'stop_loss' => $price + ($atr * $multiplier['sl']),
-                'take_profit' => $price - ($atr * $multiplier['tp'])
-            ];
-        }
-    }
-
-    private function generateReason(string $type, float $rsi, float $ema20, float $ema50, float $macd, float $macdHist): string
-    {
-        $trend = $ema20 > $ema50 ? 'Bullish' : 'Bearish';
-        $macdDirection = $macd > 0 ? 'above zero' : 'below zero';
-
-        return "EMA+RSI+MACD: {$type} signal | Trend: {$trend} | RSI: {$rsi} | MACD {$macdDirection} | Histogram: " . number_format($macdHist, 2);
-    }
-
-    private function fetchKlinesData(string $symbol, string $interval, int $limit): array
-    {
-        $response = Http::timeout(10)->get('https://fapi.binance.com/fapi/v1/klines', [
-            'symbol' => $symbol . 'USDT',
-            'interval' => $interval,
-            'limit' => $limit
-        ]);
-
-        if (!$response->successful()) {
-            throw new \Exception("API Error: " . $response->body());
-        }
-
-        return $response->json();
-    }
-
-    private function calculateEMA(array $closes, int $period): float
-    {
-        if (count($closes) < $period) {
-            return (float) end($closes);
-        }
-
-        $multiplier = 2 / ($period + 1);
-        $ema = array_sum(array_slice($closes, 0, $period)) / $period;
-
-        for ($i = $period; $i < count($closes); $i++) {
-            $ema = ($closes[$i] * $multiplier) + ($ema * (1 - $multiplier));
-        }
-
-        return $ema;
-    }
-
-    private function calculateRSI(array $closes, int $period): float
-    {
-        if (count($closes) < $period + 1) {
-            return 50.0;
-        }
-
-        $deltas = [];
-        for ($i = 1; $i < count($closes); $i++) {
-            $deltas[] = $closes[$i] - $closes[$i - 1];
-        }
-
-        $gains = array_map(fn($d) => max(0, $d), $deltas);
-        $losses = array_map(fn($d) => max(0, -$d), $deltas);
-
-        $avgGain = array_sum(array_slice($gains, 0, $period)) / $period;
-        $avgLoss = array_sum(array_slice($losses, 0, $period)) / $period;
-
-        for ($i = $period; $i < count($gains); $i++) {
-            $avgGain = (($avgGain * ($period - 1)) + $gains[$i]) / $period;
-            $avgLoss = (($avgLoss * ($period - 1)) + $losses[$i]) / $period;
-        }
-
-        if ($avgLoss == 0) {
-            return 100.0;
-        }
-
-        $rs = $avgGain / $avgLoss;
-        return 100 - (100 / (1 + $rs));
-    }
-
-    private function calculateMACD(array $closes): array
-    {
-        $ema12 = $this->calculateEMA($closes, 12);
-        $ema26 = $this->calculateEMA($closes, 26);
-        $macdLine = $ema12 - $ema26;
-
-        // Calculate signal line (9-period EMA of MACD)
-        $macdValues = [];
-        for ($i = 26; $i < count($closes); $i++) {
-            $slice = array_slice($closes, 0, $i + 1);
-            $e12 = $this->calculateEMA($slice, 12);
-            $e26 = $this->calculateEMA($slice, 26);
-            $macdValues[] = $e12 - $e26;
-        }
-
-        $signalLine = count($macdValues) >= 9 ? $this->calculateEMA($macdValues, 9) : 0;
-        $histogram = $macdLine - $signalLine;
-
-        return [
-            'macd' => $macdLine,
-            'signal' => $signalLine,
-            'histogram' => $histogram
-        ];
-    }
-
-    private function calculateATR(array $highs, array $lows, array $closes, int $period): float
-    {
-        if (count($highs) < $period + 1) {
-            return 0.0;
-        }
-
-        $trueRanges = [];
-        for ($i = 1; $i < count($highs); $i++) {
-            $tr1 = $highs[$i] - $lows[$i];
-            $tr2 = abs($highs[$i] - $closes[$i - 1]);
-            $tr3 = abs($lows[$i] - $closes[$i - 1]);
-            $trueRanges[] = max($tr1, $tr2, $tr3);
-        }
-
-        return array_sum(array_slice($trueRanges, -$period)) / $period;
-    }
-
-    private function saveSignalToDatabase(array $signal, string $symbol): void
+    private function saveSignalToDatabase(array $signal, string $symbol, bool $sentToTelegram = false): void
     {
         try {
-            CryptoSignal::saveSignal([
+            $savedSignal = CryptoSignal::saveSignal([
                 'symbol' => $symbol,
                 'strategy' => 'EMA+RSI+MACD',
                 'type' => $signal['type'],
@@ -352,6 +199,14 @@ class EmaRsiMacdCommand extends Command
                 'ltf_rsi' => $signal['ltf_rsi'],
                 'reason' => $signal['reason']
             ]);
+
+            // Обновляем статус отправки в Telegram
+            if ($sentToTelegram) {
+                $savedSignal->sent_to_telegram = true;
+                $savedSignal->save();
+            }
+
+            $this->info("💾 Signal saved to database: {$symbol} {$signal['type']} ({$signal['strength']}) - sent: " . ($sentToTelegram ? 'YES' : 'NO'));
         } catch (\Exception $e) {
             Log::error("Failed to save EMA+RSI+MACD signal", ['symbol' => $symbol, 'error' => $e->getMessage()]);
         }
