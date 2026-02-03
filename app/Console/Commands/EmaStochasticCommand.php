@@ -3,7 +3,6 @@
 namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use App\Services\TelegramService;
 use App\Models\CryptoSignal;
@@ -12,7 +11,7 @@ class EmaStochasticCommand extends Command
 {
     protected $signature = 'crypto:ema-stochastic
                             {--symbol= : Analyze specific symbol}
-                            {--interval=5m : Time interval (1m, 5m, 15m)}
+                            {--interval=15m : Time interval (5m, 15m, 30m)}
                             {--limit=100 : Number of candles to fetch}
                             {--telegram : Send signals to Telegram}
                             {--telegram-only : Only send to Telegram, no console output}';
@@ -22,11 +21,13 @@ class EmaStochasticCommand extends Command
     protected array $analysisSignals = [];
     protected array $analysisErrors = [];
     protected TelegramService $telegramService;
+    protected \App\Services\CryptoAnalysisService $analysisService;
 
-    public function __construct(TelegramService $telegramService)
+    public function __construct(TelegramService $telegramService, \App\Services\CryptoAnalysisService $analysisService)
     {
         parent::__construct();
         $this->telegramService = $telegramService;
+        $this->analysisService = $analysisService;
     }
 
     public function handle(): int
@@ -81,9 +82,36 @@ class EmaStochasticCommand extends Command
                 foreach ($this->analysisSignals as $symbol => $signals) {
                     foreach ($signals as $signal) {
                         // 🔥 Отправляем только MEDIUM и STRONG сигналы (для скальпинга)
-                        if (in_array($signal['strength'], ['MEDIUM', 'STRONG']) && CryptoSignal::shouldSendSignal($symbol, $signal['type'], $signal['strength'], 'EMA+Stochastic')) {
-                            $this->telegramService->sendInstantSignal($signal, $symbol, 'EMA+Stochastic');
-                            $this->saveSignalToDatabase($signal, $symbol);
+                        if (in_array($signal['strength'], ['MEDIUM', 'STRONG'])) {
+                            // 🔒 Глобальный фильтр: проверка рыночного контекста
+                            $marketContext = $this->analysisService->checkMarketContext($symbol, $signal['type']);
+                            
+                            if (!$marketContext['allowed']) {
+                                $this->info("⏭️ Skipping {$symbol}: {$signal['type']} - " . $marketContext['reason']);
+                                continue;
+                            }
+                            
+                            if (CryptoSignal::shouldSendSignal($symbol, $signal['type'], $signal['strength'], 'EMA+Stochastic')) {
+                                try {
+                                    $sent = $this->telegramService->sendInstantSignal($signal, $symbol, 'EMA+Stochastic');
+                                    if ($sent) {
+                                        $this->info("✅ Signal sent to Telegram: {$symbol} {$signal['type']} ({$signal['strength']})");
+                                        $this->saveSignalToDatabase($signal, $symbol, true);
+                                    } else {
+                                        $this->warn("⚠️ Failed to send signal to Telegram: {$symbol} {$signal['type']} ({$signal['strength']})");
+                                        $this->saveSignalToDatabase($signal, $symbol, false);
+                                    }
+                                } catch (\Exception $e) {
+                                    $this->error("❌ Error sending signal to Telegram: {$symbol} - " . $e->getMessage());
+                                    Log::error("EMA+Stochastic: Error sending signal", [
+                                        'symbol' => $symbol,
+                                        'error' => $e->getMessage()
+                                    ]);
+                                    $this->saveSignalToDatabase($signal, $symbol, false);
+                                }
+                            } else {
+                                $this->info("⏭️ Skipping {$symbol}: {$signal['type']} - duplicate signal (shouldSendSignal returned false)");
+                            }
                             usleep(500000);
                         } elseif ($signal['strength'] === 'WEAK') {
                             $this->info("⏭️ Skipping WEAK signal for {$symbol}: {$signal['type']} ({$signal['strength']})");
@@ -106,192 +134,54 @@ class EmaStochasticCommand extends Command
 
     private function analyzeSymbol(string $symbol, string $interval, int $limit): void
     {
-        $klines = $this->fetchKlinesData($symbol, $interval, $limit);
+        try {
+            $params = [
+                'interval' => $interval,
+                'limit' => $limit,
+            ];
 
-        if (empty($klines) || count($klines) < 30) {
-            $this->analysisErrors[$symbol] = "Insufficient data";
-            return;
-        }
+            $result = $this->analysisService->analyzeEmaStochastic($symbol, $params);
 
-        $closes = array_map(fn($k) => (float) $k[4], $klines);
-        $highs = array_map(fn($k) => (float) $k[2], $klines);
-        $lows = array_map(fn($k) => (float) $k[3], $klines);
+            if ($result['signal'] === 'HOLD') {
+                return;
+            }
 
-        $ema9 = $this->calculateEMA($closes, 9);
-        $ema21 = $this->calculateEMA($closes, 21);
-        $stochastic = $this->calculateStochastic($highs, $lows, $closes, 14, 3, 3);
-        $atr = $this->calculateATR($highs, $lows, $closes, 14);
-        $price = end($closes);
-
-        $signal = $this->generateSignal($symbol, $price, $ema9, $ema21, $stochastic, $atr);
-
-        if ($signal) {
-            $this->analysisSignals[$symbol] = [$signal];
+            $signal = $this->convertResultToSignal($result);
+            
+            if ($signal) {
+                $this->analysisSignals[$symbol] = [$signal];
+            }
+        } catch (\Exception $e) {
+            $this->analysisErrors[$symbol] = $e->getMessage();
+            \Illuminate\Support\Facades\Log::error("EMA+Stochastic analysis error for {$symbol}: " . $e->getMessage());
         }
     }
 
-    private function generateSignal(string $symbol, float $price, float $ema9, float $ema21, array $stoch, float $atr): ?array
+    private function convertResultToSignal(array $result): ?array
     {
-        $signalType = null;
-        $strength = 'WEAK';
-
-        $k = $stoch['k'];
-        $d = $stoch['d'];
-
-        // BUY: EMA9 crosses above EMA21 + Stochastic exits from oversold (< 20)
-        if ($ema9 > $ema21 && $k > 20 && $k < 50 && $k > $d) {
-            $signalType = 'BUY';
-            
-            if ($k > $d && ($k - $d) > 5) {
-                $strength = 'STRONG';
-            } elseif ($k > $d) {
-                $strength = 'MEDIUM';
-            }
-        }
-        // SELL: EMA9 crosses below EMA21 + Stochastic exits from overbought (> 80)
-        elseif ($ema9 < $ema21 && $k < 80 && $k > 50 && $k < $d) {
-            $signalType = 'SELL';
-            
-            if ($k < $d && ($d - $k) > 5) {
-                $strength = 'STRONG';
-            } elseif ($k < $d) {
-                $strength = 'MEDIUM';
-            }
-        }
-
-        if (!$signalType) {
-            return null;
-        }
-
-        $slTp = $this->calculateSLTP($signalType, $price, $atr, $strength);
-
         return [
-            'type' => $signalType,
-            'strength' => $strength,
-            'price' => $price,
-            'rsi' => 50.0,
-            'ema' => $ema9,
-            'stochastic_k' => $k,
-            'stochastic_d' => $d,
-            'atr' => $atr,
-            'stop_loss' => $slTp['stop_loss'],
-            'take_profit' => $slTp['take_profit'],
+            'type' => $result['signal'],
+            'strength' => $result['strength'],
+            'price' => $result['price'],
+            'rsi' => $result['rsi'] ?? 50.0,
+            'ema' => $result['ema_fast'] ?? $result['price'],
+            'stochastic_k' => $result['stochastic_k'] ?? 50.0,
+            'stochastic_d' => $result['stochastic_d'] ?? 50.0,
+            'stop_loss' => $result['stop_loss'],
+            'take_profit' => $result['take_profit'],
             'volume_ratio' => 1.0,
             'htf_trend' => 'N/A',
             'htf_rsi' => 0,
             'ltf_rsi' => 0,
-            'reason' => $this->generateReason($signalType, $ema9, $ema21, $k, $d)
+            'reason' => $result['reason']
         ];
     }
 
-    private function calculateSLTP(string $type, float $price, float $atr, string $strength): array
-    {
-        // Для скальпинга более узкие SL/TP
-        $multiplier = match($strength) {
-            'STRONG' => ['sl' => 1.5, 'tp' => 2.4], // RR 1:2
-            'MEDIUM' => ['sl' => 1.5, 'tp' => 1.8], // RR 1:1.5
-            default => ['sl' => 1.5, 'tp' => 1.2]   // RR 1:1
-        };
 
-        if ($type === 'BUY') {
-            return [
-                'stop_loss' => $price - ($atr * $multiplier['sl']),
-                'take_profit' => $price + ($atr * $multiplier['tp'])
-            ];
-        } else {
-            return [
-                'stop_loss' => $price + ($atr * $multiplier['sl']),
-                'take_profit' => $price - ($atr * $multiplier['tp'])
-            ];
-        }
-    }
-
-    private function generateReason(string $type, float $ema9, float $ema21, float $k, float $d): string
-    {
-        $emaTrend = $ema9 > $ema21 ? 'Bullish' : 'Bearish';
-        $stochCross = $k > $d ? 'K>D' : 'K<D';
-        
-        return "EMA+Stochastic: {$type} | EMA {$emaTrend} | Stochastic {$stochCross} | K: " . 
-               number_format($k, 1) . " | D: " . number_format($d, 1);
-    }
-
-    private function fetchKlinesData(string $symbol, string $interval, int $limit): array
-    {
-        $response = Http::timeout(10)->get('https://fapi.binance.com/fapi/v1/klines', [
-            'symbol' => $symbol . 'USDT',
-            'interval' => $interval,
-            'limit' => $limit
-        ]);
-
-        if (!$response->successful()) {
-            throw new \Exception("API Error: " . $response->body());
-        }
-
-        return $response->json();
-    }
-
-    private function calculateEMA(array $closes, int $period): float
-    {
-        if (count($closes) < $period) {
-            return (float) end($closes);
-        }
-
-        $multiplier = 2 / ($period + 1);
-        $ema = array_sum(array_slice($closes, 0, $period)) / $period;
-
-        for ($i = $period; $i < count($closes); $i++) {
-            $ema = ($closes[$i] * $multiplier) + ($ema * (1 - $multiplier));
-        }
-
-        return $ema;
-    }
-
-    private function calculateStochastic(array $highs, array $lows, array $closes, int $kPeriod, int $kSmooth, int $dPeriod): array
-    {
-        if (count($closes) < $kPeriod) {
-            return ['k' => 50.0, 'd' => 50.0];
-        }
-
-        // Calculate %K
-        $recentHighs = array_slice($highs, -$kPeriod);
-        $recentLows = array_slice($lows, -$kPeriod);
-        $currentClose = end($closes);
-        
-        $highest = max($recentHighs);
-        $lowest = min($recentLows);
-        
-        $k = 0;
-        if ($highest != $lowest) {
-            $k = (($currentClose - $lowest) / ($highest - $lowest)) * 100;
-        }
-
-        // For simplicity, using K as D (in real implementation would smooth K and then calculate D)
-        $d = $k;
-
-        return ['k' => $k, 'd' => $d];
-    }
-
-    private function calculateATR(array $highs, array $lows, array $closes, int $period): float
-    {
-        if (count($highs) < $period + 1) {
-            return 0.0;
-        }
-
-        $trueRanges = [];
-        for ($i = 1; $i < count($highs); $i++) {
-            $tr1 = $highs[$i] - $lows[$i];
-            $tr2 = abs($highs[$i] - $closes[$i - 1]);
-            $tr3 = abs($lows[$i] - $closes[$i - 1]);
-            $trueRanges[] = max($tr1, $tr2, $tr3);
-        }
-
-        return array_sum(array_slice($trueRanges, -$period)) / $period;
-    }
-
-    private function saveSignalToDatabase(array $signal, string $symbol): void
+    private function saveSignalToDatabase(array $signal, string $symbol, bool $sentToTelegram = false): void
     {
         try {
-            CryptoSignal::saveSignal([
+            $savedSignal = CryptoSignal::saveSignal([
                 'symbol' => $symbol,
                 'strategy' => 'EMA+Stochastic',
                 'type' => $signal['type'],
@@ -307,6 +197,14 @@ class EmaStochasticCommand extends Command
                 'ltf_rsi' => $signal['ltf_rsi'],
                 'reason' => $signal['reason']
             ]);
+
+            // Обновляем статус отправки в Telegram
+            if ($sentToTelegram) {
+                $savedSignal->sent_to_telegram = true;
+                $savedSignal->save();
+            }
+
+            $this->info("💾 Signal saved to database: {$symbol} {$signal['type']} ({$signal['strength']}) - sent: " . ($sentToTelegram ? 'YES' : 'NO'));
         } catch (\Exception $e) {
             Log::error("Failed to save EMA+Stochastic signal", ['symbol' => $symbol, 'error' => $e->getMessage()]);
         }

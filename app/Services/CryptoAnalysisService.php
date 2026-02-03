@@ -1074,9 +1074,10 @@ class CryptoAnalysisService
      * - Блок 1: Направление (EMA9 >/< EMA21) - обязательный
      * - Блок 2: Тайминг (K пересекает D) - только момент пересечения
      * - Блок 3: Зона Stochastic (K в диапазоне)
-     * - Сила на основе |K - D|: STRONG ≥ 7, MEDIUM 3-6, WEAK < 3 (не торгуем)
-     * - ATR-фильтр: ATR(14) > SMA(ATR, 20)
-     * - Защита от флет-пилы: |EMA9 - EMA21| ≥ 0.1 × ATR
+     * - Сила на основе |K - D|: STRONG ≥ 7, MEDIUM 2-6, WEAK < 2 (не торгуем)
+     * - ATR-фильтр: ATR(14) > 0.9 × SMA(ATR, 20)
+     * - Защита от флет-пилы: |EMA9 - EMA21| ≥ 0.05 × ATR
+     * - Зоны Stochastic: BUY [15-55], SELL [45-85]
      */
     public function analyzeEmaStochastic(string $symbol, array $params): array
     {
@@ -1085,7 +1086,7 @@ class CryptoAnalysisService
         $stochKPeriod = $params['stoch_k_period'] ?? 14;
         $stochKSmooth = $params['stoch_k_smooth'] ?? 3;
         $stochDPeriod = $params['stoch_d_period'] ?? 3;
-        $interval = $params['interval'] ?? '5m';
+        $interval = $params['interval'] ?? '15m';
         $limit = $params['limit'] ?? 100;
 
         // Fetch klines data
@@ -1121,7 +1122,7 @@ class CryptoAnalysisService
         $prevK = $prevStochastic['k'];
         $prevD = $prevStochastic['d'];
 
-        // 🔧 ФИЛЬТР 1: ATR-фильтр (ATR(14) > SMA(ATR, 20))
+        // 🔧 ФИЛЬТР 1: ATR-фильтр (ATR(14) > 0.9 × SMA(ATR, 20))
         // Рассчитываем SMA(ATR, 20) - нужны предыдущие ATR значения
         $atrValues = [];
         for ($i = 14; $i < count($closes); $i++) {
@@ -1132,7 +1133,7 @@ class CryptoAnalysisService
         }
         $smaAtr = count($atrValues) >= 20 ? array_sum(array_slice($atrValues, -20)) / 20 : $atr;
         
-        if ($atr <= $smaAtr) {
+        if ($atr <= ($smaAtr * 0.9)) {
             return [
                 'price' => $price,
                 'rsi' => 50.0,
@@ -1146,14 +1147,14 @@ class CryptoAnalysisService
                 'short_probability' => 50,
                 'stop_loss' => $price,
                 'take_profit' => $price,
-                'reason' => "Нет волатильности: ATR({$atr}) ≤ SMA(ATR,20)(" . number_format($smaAtr, 4) . ")",
+                'reason' => "Нет волатильности: ATR(" . number_format($atr, 4) . ") ≤ 0.9×SMA(ATR,20)(" . number_format($smaAtr * 0.9, 4) . ")",
                 'strength' => 'WEAK'
             ];
         }
 
-        // 🔧 ФИЛЬТР 2: Защита от флет-пилы (|EMA9 - EMA21| ≥ 0.1 × ATR)
+        // 🔧 ФИЛЬТР 2: Защита от флет-пилы (|EMA9 - EMA21| ≥ 0.05 × ATR)
         $emaDistance = abs($ema9 - $ema21);
-        $minEmaDistance = $atr * 0.1;
+        $minEmaDistance = $atr * 0.05;
         
         if ($emaDistance < $minEmaDistance) {
             return [
@@ -1169,7 +1170,7 @@ class CryptoAnalysisService
                 'short_probability' => 50,
                 'stop_loss' => $price,
                 'take_profit' => $price,
-                'reason' => "Флет-пила: |EMA9 - EMA21| = " . number_format($emaDistance, 4) . " < 0.1×ATR = " . number_format($minEmaDistance, 4),
+                'reason' => "Флет-пила: |EMA9 - EMA21| = " . number_format($emaDistance, 4) . " < 0.05×ATR = " . number_format($minEmaDistance, 4),
                 'strength' => 'WEAK'
             ];
         }
@@ -1201,13 +1202,13 @@ class CryptoAnalysisService
         $kCrossesDUp = ($prevK <= $prevD) && ($k > $d); // K пересекает D снизу
         $kCrossesDDown = ($prevK >= $prevD) && ($k < $d); // K пересекает D сверху
 
-        // 🔑 БЛОК 3: ЗОНА STOCHASTIC
-        $kInBuyZone = $k >= 20 && $k <= 50;
-        $kInSellZone = $k >= 50 && $k <= 80;
+        // 🔑 БЛОК 3: ЗОНА STOCHASTIC (расширенные диапазоны)
+        $kInBuyZone = $k >= 15 && $k <= 55;
+        $kInSellZone = $k >= 45 && $k <= 85;
         
         // Проверяем, что НЕ входим в неправильные зоны
-        $buyBlocked = $k > 60; // BUY при K > 60 - не входить
-        $sellBlocked = $k < 40; // SELL при K < 40 - не входить
+        $buyBlocked = $k > 65; // BUY при K > 65 - не входить
+        $sellBlocked = $k < 35; // SELL при K < 35 - не входить
 
         // Определяем сигнал
         $signal = 'HOLD';
@@ -1216,28 +1217,28 @@ class CryptoAnalysisService
 
         // BUY условия
         if ($buyDirection && $kCrossesDUp && $kInBuyZone && !$buyBlocked) {
-            // Определяем силу на основе |K - D|
+            // Определяем силу на основе |K - D| (снижен порог с 3 до 2)
             if ($delta >= 7) {
                 $strength = 'STRONG';
                 $signal = 'BUY';
-            } elseif ($delta >= 3) {
+            } elseif ($delta >= 2) {
                 $strength = 'MEDIUM';
                 $signal = 'BUY';
             }
-            // WEAK (< 3) - не торгуем
+            // WEAK (< 2) - не торгуем
         }
 
         // SELL условия
         if ($sellDirection && $kCrossesDDown && $kInSellZone && !$sellBlocked) {
-            // Определяем силу на основе |K - D|
+            // Определяем силу на основе |K - D| (снижен порог с 3 до 2)
             if ($delta >= 7) {
                 $strength = 'STRONG';
                 $signal = 'SELL';
-            } elseif ($delta >= 3) {
+            } elseif ($delta >= 2) {
                 $strength = 'MEDIUM';
                 $signal = 'SELL';
             }
-            // WEAK (< 3) - не торгуем
+            // WEAK (< 2) - не торгуем
         }
 
         // Если WEAK - не торгуем
@@ -1255,7 +1256,7 @@ class CryptoAnalysisService
                 'short_probability' => 50,
                 'stop_loss' => $price,
                 'take_profit' => $price,
-                'reason' => "Слабый импульс: |K - D| = " . number_format($delta, 2) . " < 3 (требуется ≥ 3)",
+                'reason' => "Слабый импульс: |K - D| = " . number_format($delta, 2) . " < 2 (требуется ≥ 2)",
                 'strength' => 'WEAK'
             ];
         }
@@ -1283,10 +1284,10 @@ class CryptoAnalysisService
         $reasons = [];
         $reasons[] = "Направление: EMA{$emaFast} " . ($buyDirection ? '>' : '<') . " EMA{$emaSlow}";
         $reasons[] = "Тайминг: K пересек D " . ($kCrossesDUp ? 'снизу' : 'сверху');
-        $reasons[] = "Зона Stochastic: K = " . number_format($k, 1) . " (BUY: [20-50], SELL: [50-80])";
+        $reasons[] = "Зона Stochastic: K = " . number_format($k, 1) . " (BUY: [15-55], SELL: [45-85])";
         $reasons[] = "Импульс: |K - D| = " . number_format($delta, 2) . " ({$strength})";
-        $reasons[] = "ATR фильтр: OK (ATR > SMA)";
-        $reasons[] = "Защита от флета: OK (|EMA9 - EMA21| ≥ 0.1×ATR)";
+        $reasons[] = "ATR фильтр: OK (ATR > 0.9×SMA)";
+        $reasons[] = "Защита от флета: OK (|EMA9 - EMA21| ≥ 0.05×ATR)";
 
         // Normalize to percentages for compatibility
         $longProb = $signal === 'BUY' ? 100 : 0;
@@ -1804,13 +1805,16 @@ class CryptoAnalysisService
     }
 
     /**
-     * Analyze symbol with Ichimoku+RSI strategy
-     * Новая рабочая логика (без баллов, только условия):
-     * - Четкая логика входа без конфликтов
-     * - Chikou Span проверка
-     * - ATR для расстояния от облака
-     * - Фильтр плоского облака
-     * - SL/TP на основе уровней Ichimoku
+     * Analyze symbol with Ichimoku+RSI strategy (1h, улучшенная версия)
+     * Таймфрейм: 1h
+     * Индикаторы: Ichimoku(9,26,52), RSI(14)
+     * Тип: Трендовая с облачной поддержкой, минимизация сливов
+     * 
+     * Улучшения:
+     * - Суженные зоны RSI → меньше сигналов во флете
+     * - Более строгий фильтр облака → исключаем тонкое облако
+     * - Расстояние от облака ≤ 0.8 × ATR → сигнал ближе к тренду
+     * - SL с буфером ATR → меньше случайных стопов
      */
     public function analyzeIchimokuRsi(string $symbol, array $params): array
     {
@@ -1848,8 +1852,9 @@ class CryptoAnalysisService
         $count = count($closes);
         $price26PeriodsAgo = $count >= 26 ? $closes[$count - 26] : $price;
 
+        // 🔧 ФИЛЬТР 1: Фильтр плоского облака (|Senkou A − Senkou B| ≥ 0.6 × ATR)
         $cloudThickness = abs($senkouA - $senkouB);
-        $minCloudThickness = $atr * 0.5;
+        $minCloudThickness = $atr * 0.6;
 
         if ($cloudThickness < $minCloudThickness) {
             return [
@@ -1869,74 +1874,89 @@ class CryptoAnalysisService
                 'short_probability' => 50,
                 'stop_loss' => $price,
                 'take_profit' => $price,
-                'reason' => "Плоское облако: |Senkou A - Senkou B| = " . number_format($cloudThickness, 4) . " < 0.5×ATR = " . number_format($minCloudThickness, 4),
+                'reason' => "Плоское облако: |Senkou A - Senkou B| = " . number_format($cloudThickness, 4) . " < 0.6×ATR = " . number_format($minCloudThickness, 4),
                 'strength' => 'WEAK'
             ];
         }
 
+        // 🔧 ФИЛЬТР 2: Расстояние от облака (Цена ≤ 0.8 × ATR от ближайшей линии облака)
         $distanceFromCloud = $priceAboveCloud ? ($price - $cloudTop) : ($cloudBottom - $price);
-        $maxDistance = $atr * 1.0;
-        $tooFarFromCloud = $distanceFromCloud > ($atr * 1.5);
+        $maxDistance = $atr * 0.8;
 
         $signal = 'HOLD';
         $strength = 'WEAK';
         $reasons = [];
 
+        // 🔑 БЛОК 1: УСЛОВИЯ НАПРАВЛЕНИЯ (обязательные)
         if ($priceAboveCloud) {
+            // BUY условия
             $tenkanAboveKijun = $tenkan > $kijun;
             $chikouAbovePrice26 = $chikou > $price26PeriodsAgo;
-            $rsiInBuyZone = $rsi >= 45 && $rsi <= 65;
-            $rsiTooHigh = $rsi > 70;
+            
+            // 🔑 БЛОК 2: УСЛОВИЯ RSI (фильтр тренда) - BUY: RSI ∈ [50–60]
+            $rsiInBuyZone = $rsi >= 50 && $rsi <= 60;
+            
+            // 🔑 БЛОК 3: Расстояние от облака (Цена ≤ 0.8 × ATR)
             $priceNearCloud = $distanceFromCloud <= $maxDistance;
 
-            if ($tenkanAboveKijun && $chikouAbovePrice26 && $rsiInBuyZone && $priceNearCloud && !$rsiTooHigh && !$tooFarFromCloud) {
+            // Все условия выполнены → STRONG сигнал
+            if ($tenkanAboveKijun && $chikouAbovePrice26 && $rsiInBuyZone && $priceNearCloud) {
                 $signal = 'BUY';
                 $strength = 'STRONG';
-                $reasons[] = "Цена выше облака";
+                $reasons[] = "Цена > облака";
                 $reasons[] = "Tenkan > Kijun";
                 $reasons[] = "Chikou > цена(-26)";
-                $reasons[] = "RSI в зоне 45-65";
-                $reasons[] = "Расстояние от облака ≤ 1×ATR";
-            } elseif ($rsiTooHigh) {
-                $reasons[] = "RSI слишком высокий ({$rsi} > 70)";
-            } elseif ($tooFarFromCloud) {
-                $reasons[] = "Цена слишком далеко от облака (> 1.5×ATR)";
-            } elseif (!$tenkanAboveKijun) {
-                $reasons[] = "Tenkan ≤ Kijun";
-            } elseif (!$chikouAbovePrice26) {
-                $reasons[] = "Chikou ≤ цена(-26)";
-            } elseif (!$rsiInBuyZone) {
-                $reasons[] = "RSI вне зоны ({$rsi}, требуется 45-65)";
-            } elseif (!$priceNearCloud) {
-                $reasons[] = "Расстояние от облака > 1×ATR";
+                $reasons[] = "RSI в зоне 50-60";
+                $reasons[] = "Расстояние от облака ≤ 0.8×ATR";
+            } else {
+                // Формируем причину отказа
+                if (!$tenkanAboveKijun) {
+                    $reasons[] = "Tenkan ≤ Kijun";
+                }
+                if (!$chikouAbovePrice26) {
+                    $reasons[] = "Chikou ≤ цена(-26)";
+                }
+                if (!$rsiInBuyZone) {
+                    $reasons[] = "RSI вне зоны ({$rsi}, требуется 50-60)";
+                }
+                if (!$priceNearCloud) {
+                    $reasons[] = "Расстояние от облака > 0.8×ATR";
+                }
             }
         } else {
+            // SELL условия
             $tenkanBelowKijun = $tenkan < $kijun;
             $chikouBelowPrice26 = $chikou < $price26PeriodsAgo;
-            $rsiInSellZone = $rsi >= 35 && $rsi <= 55;
-            $rsiTooLow = $rsi < 30;
+            
+            // 🔑 БЛОК 2: УСЛОВИЯ RSI (фильтр тренда) - SELL: RSI ∈ [40–50]
+            $rsiInSellZone = $rsi >= 40 && $rsi <= 50;
+            
+            // 🔑 БЛОК 3: Расстояние от облака (Цена ≤ 0.8 × ATR)
             $priceNearCloud = $distanceFromCloud <= $maxDistance;
 
-            if ($tenkanBelowKijun && $chikouBelowPrice26 && $rsiInSellZone && $priceNearCloud && !$rsiTooLow && !$tooFarFromCloud) {
+            // Все условия выполнены → STRONG сигнал
+            if ($tenkanBelowKijun && $chikouBelowPrice26 && $rsiInSellZone && $priceNearCloud) {
                 $signal = 'SELL';
                 $strength = 'STRONG';
-                $reasons[] = "Цена ниже облака";
+                $reasons[] = "Цена < облака";
                 $reasons[] = "Tenkan < Kijun";
                 $reasons[] = "Chikou < цена(-26)";
-                $reasons[] = "RSI в зоне 35-55";
-                $reasons[] = "Расстояние от облака ≤ 1×ATR";
-            } elseif ($rsiTooLow) {
-                $reasons[] = "RSI слишком низкий ({$rsi} < 30)";
-            } elseif ($tooFarFromCloud) {
-                $reasons[] = "Цена слишком далеко от облака (> 1.5×ATR)";
-            } elseif (!$tenkanBelowKijun) {
-                $reasons[] = "Tenkan ≥ Kijun";
-            } elseif (!$chikouBelowPrice26) {
-                $reasons[] = "Chikou ≥ цена(-26)";
-            } elseif (!$rsiInSellZone) {
-                $reasons[] = "RSI вне зоны ({$rsi}, требуется 35-55)";
-            } elseif (!$priceNearCloud) {
-                $reasons[] = "Расстояние от облака > 1×ATR";
+                $reasons[] = "RSI в зоне 40-50";
+                $reasons[] = "Расстояние от облака ≤ 0.8×ATR";
+            } else {
+                // Формируем причину отказа
+                if (!$tenkanBelowKijun) {
+                    $reasons[] = "Tenkan ≥ Kijun";
+                }
+                if (!$chikouBelowPrice26) {
+                    $reasons[] = "Chikou ≥ цена(-26)";
+                }
+                if (!$rsiInSellZone) {
+                    $reasons[] = "RSI вне зоны ({$rsi}, требуется 40-50)";
+                }
+                if (!$priceNearCloud) {
+                    $reasons[] = "Расстояние от облака > 0.8×ATR";
+                }
             }
         }
 
@@ -1944,18 +1964,23 @@ class CryptoAnalysisService
             $reasons[] = "Не выполнены условия для входа";
         }
 
+        // 🔧 РИСК-МЕНЕДЖМЕНТ: SL/TP с буфером ATR
         $stopLoss = $price;
         $takeProfit = $price;
 
         if ($signal === 'BUY') {
-            $slBelowKijun = min($kijun, $senkouB);
-            $stopLoss = $slBelowKijun;
+            // SL = min(Kijun, Senkou B) − 0.5 × ATR
+            $slBase = min($kijun, $senkouB);
+            $stopLoss = $slBase - ($atr * 0.5);
             $risk = $price - $stopLoss;
+            // TP = Цена + (Risk × 2.0)
             $takeProfit = $price + ($risk * 2.0);
         } elseif ($signal === 'SELL') {
-            $slAboveKijun = max($kijun, $senkouB);
-            $stopLoss = $slAboveKijun;
+            // SL = max(Kijun, Senkou B) + 0.5 × ATR
+            $slBase = max($kijun, $senkouB);
+            $stopLoss = $slBase + ($atr * 0.5);
             $risk = $stopLoss - $price;
+            // TP = Цена − (Risk × 2.0)
             $takeProfit = $price - ($risk * 2.0);
         }
 

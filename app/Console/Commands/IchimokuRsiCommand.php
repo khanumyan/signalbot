@@ -69,17 +69,47 @@ class IchimokuRsiCommand extends Command
 
         if ($sendTelegram || $telegramOnly) {
             if (!empty($this->analysisSignals)) {
+                $this->info('📱 Sending signals to instant signal bot...');
                 foreach ($this->analysisSignals as $symbol => $signals) {
                     foreach ($signals as $signal) {
-                        if (in_array($signal['strength'], ['STRONG']) && CryptoSignal::shouldSendSignal($symbol, $signal['type'], $signal['strength'], 'Ichimoku+RSI', $signal['rsi'])) {
-                            $this->telegramService->sendInstantSignal($signal, $symbol, 'Ichimoku+RSI');
-                            $this->saveSignalToDatabase($signal, $symbol);
+                        if (in_array($signal['strength'], ['STRONG'])) {
+                            // 🔒 Глобальный фильтр: проверка рыночного контекста
+                            $marketContext = $this->analysisService->checkMarketContext($symbol, $signal['type']);
+                            
+                            if (!$marketContext['allowed']) {
+                                $this->info("⏭️ Skipping {$symbol}: {$signal['type']} - " . $marketContext['reason']);
+                                continue;
+                            }
+                            
+                            if (CryptoSignal::shouldSendSignal($symbol, $signal['type'], $signal['strength'], 'Ichimoku+RSI', $signal['rsi'])) {
+                                try {
+                                    $sent = $this->telegramService->sendInstantSignal($signal, $symbol, 'Ichimoku+RSI');
+                                    if ($sent) {
+                                        $this->info("✅ Signal sent to Telegram: {$symbol} {$signal['type']} ({$signal['strength']})");
+                                        $this->saveSignalToDatabase($signal, $symbol, true);
+                                    } else {
+                                        $this->warn("⚠️ Failed to send signal to Telegram: {$symbol} {$signal['type']} ({$signal['strength']})");
+                                        $this->saveSignalToDatabase($signal, $symbol, false);
+                                    }
+                                } catch (\Exception $e) {
+                                    $this->error("❌ Error sending signal to Telegram: {$symbol} - " . $e->getMessage());
+                                    Log::error("Ichimoku+RSI: Error sending signal", [
+                                        'symbol' => $symbol,
+                                        'error' => $e->getMessage()
+                                    ]);
+                                    $this->saveSignalToDatabase($signal, $symbol, false);
+                                }
+                            } else {
+                                $this->info("⏭️ Skipping {$symbol}: {$signal['type']} - duplicate signal (shouldSendSignal returned false)");
+                            }
                             usleep(500000);
                         }
                     }
                 }
+                $this->info('✅ Signals sent to instant bot!');
             } else {
                 $this->telegramService->sendNoSignalsMessage($totalSymbols, count($this->analysisErrors), $this->analysisErrors);
+                $this->info('✅ No signals message sent!');
             }
         }
 
@@ -96,16 +126,10 @@ class IchimokuRsiCommand extends Command
             'interval' => $interval,
             'limit' => $limit,
             'rsi_period' => 14,
-            'rsi_buy_min' => 40,
-            'rsi_buy_max' => 70,
-            'rsi_sell_min' => 30,
-            'rsi_sell_max' => 60,
             'tenkan_period' => 9,
             'kijun_period' => 26,
             'senkou_b_period' => 52,
             'atr_period' => 14,
-            'stop_loss_multiplier' => 2.3,
-            'take_profit_multiplier' => 2.0,
         ];
 
         $result = $this->analysisService->analyzeIchimokuRsi($symbol, $params);
@@ -148,10 +172,10 @@ class IchimokuRsiCommand extends Command
         ];
     }
 
-    private function saveSignalToDatabase(array $signal, string $symbol): void
+    private function saveSignalToDatabase(array $signal, string $symbol, bool $sentToTelegram = false): void
     {
         try {
-            CryptoSignal::saveSignal([
+            $savedSignal = CryptoSignal::saveSignal([
                 'symbol' => $symbol,
                 'strategy' => 'Ichimoku+RSI',
                 'type' => $signal['type'],
@@ -167,6 +191,14 @@ class IchimokuRsiCommand extends Command
                 'ltf_rsi' => $signal['ltf_rsi'],
                 'reason' => $signal['reason']
             ]);
+
+            // Обновляем статус отправки в Telegram
+            if ($sentToTelegram) {
+                $savedSignal->sent_to_telegram = true;
+                $savedSignal->save();
+            }
+
+            $this->info("💾 Signal saved to database: {$symbol} {$signal['type']} ({$signal['strength']}) - sent: " . ($sentToTelegram ? 'YES' : 'NO'));
         } catch (\Exception $e) {
             Log::error("Failed to save Ichimoku+RSI signal", ['symbol' => $symbol, 'error' => $e->getMessage()]);
         }

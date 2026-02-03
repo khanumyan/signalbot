@@ -62,11 +62,11 @@ Schedule::command('crypto:ema-stochastic --telegram-only --interval=5m')
 //     ->appendOutputTo(storage_path('logs/crypto_analysis.log'));
 
 // Ichimoku + RSI strategy - каждый час
-//Schedule::command('crypto:ichimoku-rsi --telegram-only --interval=1h')
-//    ->hourly()
-//    ->withoutOverlapping()
-//    ->runInBackground()
-//    ->appendOutputTo(storage_path('logs/crypto_analysis.log'));
+Schedule::command('crypto:ichimoku-rsi --telegram-only --interval=1h')
+    ->hourly()
+    ->withoutOverlapping()
+    ->runInBackground()
+    ->appendOutputTo(storage_path('logs/crypto_analysis.log'));
 
 // Smart Money Concepts strategy - каждые 25 минут
 Schedule::command('crypto:smart-money-concepts --telegram-only --interval=15m')
